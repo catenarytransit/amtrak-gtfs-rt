@@ -47,8 +47,8 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                             vehicle_positions: gtfs_rt::FeedMessage {
                                 entity: featurescollection.features.iter().map(|feature| {
                                     let geometry = feature.geometry.as_ref().unwrap();
-                                    let point: Option<geojson::PointType> = match &geometry.value {
-                                        geojson::Value::Point(x) => Some(*x),
+                                    let point: Option<geojson::PointType> = match geometry.value.clone() {
+                                        geojson::Value::Point(x) => Some(x),
                                         _ => None
                                     };
 
@@ -98,7 +98,7 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                                         _ => None
                                     };
 
-                                    let id: Option<String> = match feature.properties.as_ref().unwrap().get("ID") {
+                                    let id: Option<String> = match feature.properties.as_ref().unwrap().get("TrainNum") {
                                         Some(a) => 
                                             match a {
                                                 serde_json::value::Value::String(x) => Some(x.clone()),
