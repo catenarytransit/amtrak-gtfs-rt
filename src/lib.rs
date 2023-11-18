@@ -57,7 +57,7 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                                     let speed: Option<f32> = match feature.properties.as_ref().unwrap().get("Velocity") {
                                         Some(speed_text) => 
                                             match speed_text {
-                                                serde_json::value::Value::String(x) => Some(x.as_str().parse::<f32>().unwrap()),
+                                                serde_json::value::Value::String(x) => Some(x.as_str().parse::<f32>().unwrap() * 0.2777777),
                                                 _ => None
                                             }
                                         ,
