@@ -6,8 +6,8 @@ use chrono_tz::Tz;
 use chrono_tz::UTC;
 
 pub struct GtfsAmtrakResults {
-    vehicle_positions: gtfs_rt::FeedMessage,
-    trip_updates: gtfs_rt::FeedMessage
+    pub vehicle_positions: gtfs_rt::FeedMessage,
+    pub trip_updates: gtfs_rt::FeedMessage
 }
 
 pub fn make_gtfs_header() -> gtfs_rt::FeedHeader {
