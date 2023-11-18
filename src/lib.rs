@@ -108,7 +108,7 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                                         _ => None
                                     };
 
-                                    let bearing: Option<f32> = match feature.properties.as_ref().unwrap().get("Velocity") {
+                                    let bearing: Option<f32> = match feature.properties.as_ref().unwrap().get("Heading") {
                                         Some(bearing_text) => 
                                             match bearing_text {
                                                 serde_json::value::Value::String(x) => match x.as_str() {
