@@ -1,12 +1,12 @@
 use std::time::{Duration, SystemTime};
 use std::time::UNIX_EPOCH;
 
-struct GtfsAmtrakResults {
+pub struct GtfsAmtrakResults {
     vehicle_positions: gtfs_rt::FeedMessage,
     trip_updates: gtfs_rt::FeedMessage
 }
 
-fn make_gtfs_header() -> gtfs_rt::FeedHeader {
+pub fn make_gtfs_header() -> gtfs_rt::FeedHeader {
     gtfs_rt::FeedHeader {
         gtfs_realtime_version: String::from("2.0"),
         incrementality: None,
@@ -18,13 +18,19 @@ fn make_gtfs_header() -> gtfs_rt::FeedHeader {
 }
 
 pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrakResults,Box<dyn std::error::Error>> {
+        println!("fetching");
+        
         let raw_data = client.get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData").send().await;
 
         match raw_data {
             Ok(raw_data) => {
+
+                println!("Raw data successfully downloaded");
+
                 match amtk::decrypt(raw_data.text().await.unwrap().as_str()) {
                     Ok(decrypted_string) => {
-                        println!("{:?}", decrypted_string);
+                        println!("Successfully decrypted");
+                        println!("{}", decrypted_string);
                         Ok(GtfsAmtrakResults {
                             vehicle_positions: gtfs_rt::FeedMessage {
                                 entity: vec![],
@@ -42,6 +48,8 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                 }
             },
             Err(err) => {
+                println!("Raw data err");
+
                 Err(Box::new(err))
             }
         }
@@ -53,6 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_amtrak() {
+        println!("running test");
         let client = reqwest::Client::new();
 
         let amtrak_results = fetch_amtrak_gtfs_rt(&client).await;
