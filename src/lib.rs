@@ -4,6 +4,9 @@ use geojson::FeatureCollection;
 use geojson::GeoJson;
 use chrono_tz::Tz;
 use chrono_tz::UTC;
+use chrono::{NaiveDate, NaiveTime, NaiveDateTime};
+use chrono::DateTime;
+use chrono::TimeZone;
 
 pub struct GtfsAmtrakResults {
     pub vehicle_positions: gtfs_rt::FeedMessage,
@@ -21,10 +24,38 @@ pub fn make_gtfs_header() -> gtfs_rt::FeedHeader {
     }
 }
 
+fn convert_12_to_24_hour(hour: u8, pm: bool) -> u8 {
+    match pm {
+        false => {
+            match hour {
+                12 => 0,
+                _ => hour + 12
+            }
+        },
+        true => hour + 12
+    }
+}
+
+//time is formatted 11/18/2023 4:58:09 PM
+pub fn process_timestamp_text(timestamp_text: &str) -> u64 {
+    let parts = timestamp_text.split(" ").collect::<Vec<&str>>();
+
+    let date_parts = parts[0].split("/").map(|x| x.parse::<i32>().unwrap()).collect::<Vec<i32>>();
+
+    let time_parts = parts[1].split(":").map(|x| x.parse::<u8>().unwrap()).collect::<Vec<u8>>();
+
+    let is_pm = parts[2] == "PM";
+
+    let native_dt = NaiveDate::from_ymd_opt(date_parts[2], date_parts[0].try_into().unwrap(), date_parts[1].try_into().unwrap()).unwrap()
+    .and_hms_opt(convert_12_to_24_hour(time_parts[0], is_pm).into(), time_parts[1].into(), time_parts[2].into()).unwrap();
+
+    let newyorktime = chrono_tz::America::New_York.from_local_datetime(&native_dt).unwrap();
+
+    newyorktime.timestamp().try_into().unwrap()
+}
+
 pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrakResults,Box<dyn std::error::Error>> {
         //println!("fetching");
-
-        let tz: Tz = "America/Los_Angeles".parse().unwrap();
         
         let raw_data = client.get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData").send().await;
 
@@ -65,13 +96,10 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                                     };
 
                                     //unix time seconds
-                                    let timestamp: Option<u64> = match feature.properties.as_ref().unwrap().get("LastValTS") {
+                                    let timestamp: Option<u64> = match feature.properties.as_ref().unwrap().get("updated_at") {
                                         Some(timestamp_text) => 
                                             match timestamp_text {
-                                                serde_json::value::Value::String(x) => Some(SystemTime::now()
-                                                .duration_since(SystemTime::UNIX_EPOCH)
-                                                .unwrap()
-                                                .as_secs()),
+                                                serde_json::value::Value::String(timestamp_text) => Some(process_timestamp_text(timestamp_text)),
                                                 _ => None
                                             }
                                         ,
