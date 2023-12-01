@@ -58,13 +58,13 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
         //println!("fetching");
         
         let raw_data = client.get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData").send().await;
-
-        match raw_data {
-            Ok(raw_data) => {
-
+        if raw_data.is_err() {
+            println!("Raw data err");
+            return Err(Box::new(raw_data.unwrap_err()));
+        }
                 //println!("Raw data successfully downloaded");
 
-                match amtk::decrypt(raw_data.text().await.unwrap().as_str()) {
+                match amtk::decrypt(raw_data.unwrap().text().await.unwrap().as_str()) {
                     Ok(decrypted_string) => {
 
                         
@@ -206,13 +206,6 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                         Err(Box::new(err))
                     }
                 }
-            },
-            Err(err) => {
-                println!("Raw data err");
-
-                Err(Box::new(err))
-            }
-        }
 }
 
 #[cfg(test)]
