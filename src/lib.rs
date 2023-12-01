@@ -56,16 +56,13 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
         println!("Raw data err");
         return Err(Box::new(raw_data.unwrap_err()));
     }
-    //println!("Raw data successfully downloaded");
     let decrypted_string = amtk::decrypt(raw_data.unwrap().text().await.unwrap().as_str());
     if decrypted_string.is_err() {
-        println!("Raw data err");
+        println!("Decryption err");
         return Err(Box::new(decrypted_string.unwrap_err()));
     }
     let geojson: geojson::GeoJson = decrypted_string.unwrap().parse::<geojson::GeoJson>().unwrap();
     let featurescollection: FeatureCollection = FeatureCollection::try_from(geojson).unwrap();
-    //println!("Successfully decrypted");
-    //println!("{}", decrypted_string);
     Ok(GtfsAmtrakResults {
         vehicle_positions: gtfs_rt::FeedMessage {
             entity: featurescollection.features.iter().map(|feature| {
