@@ -140,7 +140,7 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                                         Some(bearing_text) => 
                                             match bearing_text {
                                                 serde_json::value::Value::String(x) => match x.as_str() {
-                                                    "N" => Some(0.01),
+                                                    "N" => Some(0.001),
                                                     "NE" => Some(45.0),
                                                     "E" => Some(90.0),
                                                     "SE" => Some(135.0),
