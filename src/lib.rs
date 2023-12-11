@@ -356,5 +356,7 @@ mod tests {
         let amtrak_results = fetch_amtrak_gtfs_rt_joined(&gtfs, &client).await;
 
         assert!(amtrak_results.is_ok());
+
+        println!("{:#?}", amtrak_results.unwrap());
     }
 }
