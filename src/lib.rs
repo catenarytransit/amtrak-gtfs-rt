@@ -3,6 +3,7 @@ use chrono::TimeZone;
 use geojson::FeatureCollection;
 use gtfs_structures::Gtfs;
 use std::time::SystemTime;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResults {
@@ -15,6 +16,7 @@ pub struct GtfsAmtrakResultsJoined {
     pub unified_feed: gtfs_rt::FeedMessage,
 }
 
+#[derive(serde::Deserialize)]
 pub struct AmtrakArrivalJson {
     //{"code":"CTL",
     code: String,
@@ -43,7 +45,28 @@ pub struct AmtrakArrivalJson {
 }
 
 pub fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakArrivalJson> {
-    vec![]
+    let mut amtrak_arrival_jsons = vec![];
+
+    for i in 0 as i32..100 as i32 {
+        let mut key = String::from("Station");
+        key.push_str(&i.to_string());
+
+        match feature.properties.as_ref().unwrap().get(key.as_str()) {
+            Some(station_text) => match station_text {
+                serde_json::value::Value::String(station_text) => {
+                    let amtrak_arrival: Result<AmtrakArrivalJson, serde_json::Error> = serde_json::from_str(&station_text);
+
+                    if amtrak_arrival.is_ok() {
+                        amtrak_arrival_jsons.push(amtrak_arrival.unwrap());
+                    }
+                }
+                _ => {},
+            },
+            _ => {}
+        };
+    }
+
+    amtrak_arrival_jsons
 }
 
 pub fn get_speed(feature: &geojson::Feature) -> Option<f32> {
@@ -85,9 +108,15 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
         _ => None,
     };
 
+    let long_name_to_route_id_hashmap:HashMap<String, String> = HashMap::from_iter(gtfs.routes.iter().map(|(string, route)| {
+        (route.long_name.clone(), route.id.clone())
+    }));
+
     let point = point.unwrap();
 
     let speed: Option<f32> = get_speed(feature);
+
+    let arrivals_raw = feature_to_amtrak_arrival_structs(feature);
 
     //unix time seconds
     let timestamp: Option<u64> =
@@ -110,7 +139,7 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
             _ => None,
         };
 
-    let route_id: Option<String> =
+    let route_name: Option<String> =
         match feature.properties.as_ref().unwrap().get("RouteName") {
             Some(a) => match a {
                 serde_json::value::Value::String(x) => Some(x.clone()),
@@ -127,6 +156,11 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
             },
             _ => None,
         };
+
+    let route_id: Option<String> = match route_name {
+        Some(route_name) => long_name_to_route_id_hashmap.get(&route_name.clone()).cloned(),
+        None => None
+    };
 
     let bearing: Option<f32> = get_bearing(feature);
 
