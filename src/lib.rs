@@ -46,6 +46,18 @@ pub fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<Amtr
     vec![]
 }
 
+pub fn get_speed(feature: &geojson::Feature) -> Option<f32> {
+    match feature.properties.as_ref().unwrap().get("Velocity") {
+        Some(speed_text) => match speed_text {
+            serde_json::value::Value::String(x) => {
+                Some(x.as_str().parse::<f32>().unwrap() * 0.2777777)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
@@ -55,16 +67,7 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
 
     let point = point.unwrap();
 
-    let speed: Option<f32> =
-        match feature.properties.as_ref().unwrap().get("Velocity") {
-            Some(speed_text) => match speed_text {
-                serde_json::value::Value::String(x) => {
-                    Some(x.as_str().parse::<f32>().unwrap() * 0.2777777)
-                }
-                _ => None,
-            },
-            _ => None,
-        };
+    let speed: Option<f32> = get_speed(feature);
 
     //unix time seconds
     let timestamp: Option<u64> =
