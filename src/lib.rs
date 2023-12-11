@@ -7,10 +7,44 @@ use chrono_tz::UTC;
 use chrono::{NaiveDate, NaiveTime, NaiveDateTime};
 use chrono::DateTime;
 use chrono::TimeZone;
+use gtfs_structures::Gtfs;
 
+#[derive(Clone,Debug)]
 pub struct GtfsAmtrakResults {
-    pub vehicle_positions: gtfs_rt::FeedMessage,
-    pub trip_updates: gtfs_rt::FeedMessage
+    trip_updates: gtfs_rt::FeedMessage,
+    vehicle_positions: gtfs_rt::FeedMessage
+}
+
+#[derive(Clone,Debug)]
+pub struct GtfsAmtrakResultsJoined {
+    pub unified_feed: gtfs_rt::FeedMessage,
+}
+
+pub struct AmtrakArrivalJson {
+    //{"code":"CTL",
+    code: String,
+    //"tz":"P",
+    tz: String,
+    //"bus":false,
+    bus: bool,
+   // "scharr":"12/11/2023 17:33:00",
+   scharr: String,
+   // "schdep":"12/11/2023 17:36:00",
+   schdep: String,
+   // "schcmnt":"",
+   schcmnt: String,
+    //"autoarr":true,
+    autoarr: bool,
+    //"autodep":true,
+    autodep: bool,
+   // "estarr":"12/11/2023 17:33:00",
+   estarr: String,
+    //"estdep":"12/11/2023 17:36:00",
+    estdep: String,
+    //"estarrcmnt":"ON TIME",
+    estarrcmnt: String,
+    //"estdepcmnt":"ON TIME"
+    estdepcmnt: String
 }
 
 pub fn make_gtfs_header() -> gtfs_rt::FeedHeader {
@@ -54,7 +88,7 @@ pub fn process_timestamp_text(timestamp_text: &str) -> u64 {
     newyorktime.timestamp().try_into().unwrap()
 }
 
-pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrakResults,Box<dyn std::error::Error>> {
+pub async fn fetch_amtrak_gtfs_rt_joined(gtfs: &Gtfs,client: &reqwest::Client) -> Result<GtfsAmtrakResultsJoined,Box<dyn std::error::Error>> {
         //println!("fetching");
         
         let raw_data = client.get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData").send().await;
@@ -65,17 +99,13 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                 //println!("Raw data successfully downloaded");
 
                 match amtk::decrypt(raw_data.text().await.unwrap().as_str()) {
-                    Ok(decrypted_string) => {
-
-                        
-                    let geojson: geojson::GeoJson = decrypted_string.parse::<geojson::GeoJson>().unwrap();
-
+                    Ok(decrypted_string) => {                    let geojson: geojson::GeoJson = decrypted_string.parse::<geojson::GeoJson>().unwrap();
                     let featurescollection: FeatureCollection = FeatureCollection::try_from(geojson).unwrap();
                     
                         //println!("Successfully decrypted");
                         //println!("{}", decrypted_string);
-                        Ok(GtfsAmtrakResults {
-                            vehicle_positions: gtfs_rt::FeedMessage {
+                        Ok(GtfsAmtrakResultsJoined {
+                            unified_feed: gtfs_rt::FeedMessage {
                                 entity: featurescollection.features.iter().map(|feature| {
                                     let geometry = feature.geometry.as_ref().unwrap();
                                     let point: Option<geojson::PointType> = match geometry.value.clone() {
@@ -156,12 +186,27 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                                         _ => None
                                     };
 
+                                    let trip_desc = gtfs_rt::TripDescriptor {
+                                        trip_id: trip_id,
+                                        route_id: route_id,
+                                        direction_id: None,
+                                        start_time: None,
+                                        start_date: None,
+                                        schedule_relationship: None
+                                    };
+
                                     gtfs_rt::FeedEntity {
                                         alert: None,
                                         id: id.unwrap(),
                                         is_deleted: Some(false),
                                         shape: None,
-                                        trip_update: None,
+                                        trip_update: Some(
+                                            gtfs_rt::TripUpdate {
+                                                vehicle: None,
+                                                trip: Some(trip_desc),
+                                                timestamp: timestamp,
+                                            }
+                                        ),
                                         vehicle: Some(
                                             gtfs_rt::VehiclePosition {
                                                 stop_id: None,
@@ -173,14 +218,7 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                                                 multi_carriage_details: vec![],
                                                 current_stop_sequence: None,
                                                 vehicle: None,
-                                                trip: Some(gtfs_rt::TripDescriptor {
-                                                    trip_id: trip_id,
-                                                    route_id: route_id,
-                                                    direction_id: None,
-                                                    start_time: None,
-                                                    start_date: None,
-                                                    schedule_relationship: None
-                                                }),
+                                                trip: Some(trip_desc),
                                                 position: Some(
                                                     gtfs_rt::Position {
                                                         speed: speed,
@@ -195,11 +233,7 @@ pub async fn fetch_amtrak_gtfs_rt(client: &reqwest::Client) -> Result<GtfsAmtrak
                                     }
                                 }).collect::<Vec<gtfs_rt::FeedEntity>>(),
                                 header: make_gtfs_header()
-                            },
-                            trip_updates: gtfs_rt::FeedMessage {
-                                entity: vec![],
-                                header: make_gtfs_header()
-                            },
+                            }
                         })
                     },
                     Err(err) => {
@@ -221,10 +255,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_amtrak() {
-        println!("running test");
         let client = reqwest::Client::new();
 
-        let amtrak_results = fetch_amtrak_gtfs_rt(&client).await;
+        println!("download and process amtrak gtfs file");
+
+        let gtfs = Gtfs::from_url_async("https://content.amtrak.com/content/gtfs/GTFS.zip").await.unwrap();
+        
+        println!("amtrak download finished");
+
+        let amtrak_results = fetch_amtrak_gtfs_rt_joined(&gtfs,&client).await;
 
         assert!(amtrak_results.is_ok());
     }
