@@ -111,16 +111,24 @@ pub async fn fetch_amtrak_gtfs_rt(
     let mut trips: Vec<gtfs_rt::FeedEntity> = vec![];
 
     match joined_res {
-        Ok(joined_res) => Ok(GtfsAmtrakResults {
-            trip_updates: gtfs_rt::FeedMessage {
-                entity: trips,
-                header: joined_res.unified_feed.header.clone(),
-            },
-            vehicle_positions: gtfs_rt::FeedMessage {
-                entity: vehicles,
-                header: joined_res.unified_feed.header.clone(),
-            },
-        }),
+        Ok(joined_res) => {
+
+            for feedentity in joined_res.unified_feed.entity {
+                vehicles.push(feedentity.clone());
+                trips.push(feedentity.clone());
+            }
+
+            Ok(GtfsAmtrakResults {
+                trip_updates: gtfs_rt::FeedMessage {
+                    entity: trips,
+                    header: joined_res.unified_feed.header.clone(),
+                },
+                vehicle_positions: gtfs_rt::FeedMessage {
+                    entity: vehicles,
+                    header: joined_res.unified_feed.header.clone(),
+                },
+            })
+        },
         Err(x) => Err(x),
     }
 }
