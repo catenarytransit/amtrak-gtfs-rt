@@ -9,12 +9,13 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
+    - name: Install Dependencies
+      run: sudo apt install protobuf-compiler
     - name: Build
       run: cargo build --verbose
     - name: Test
-      rust: cargo test --verbose
+      run: cargo test --verbose

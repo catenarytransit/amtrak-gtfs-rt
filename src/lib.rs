@@ -1,11 +1,6 @@
-use std::time::{Duration, SystemTime};
-use std::time::UNIX_EPOCH;
+use std::time::SystemTime;
 use geojson::FeatureCollection;
-use geojson::GeoJson;
-use chrono_tz::Tz;
-use chrono_tz::UTC;
-use chrono::{NaiveDate, NaiveTime, NaiveDateTime};
-use chrono::DateTime;
+use chrono::NaiveDate;
 use chrono::TimeZone;
 use gtfs_structures::Gtfs;
 
@@ -240,13 +235,14 @@ pub async fn fetch_amtrak_gtfs_rt_joined(gtfs: &Gtfs,client: &reqwest::Client) -
                         Err(Box::new(err))
                     }
                 }
-            },
-            Err(err) => {
-                println!("Raw data err");
-
-                Err(Box::new(err))
-            }
-        }
+            }).collect::<Vec<gtfs_rt::FeedEntity>>(),
+            header: make_gtfs_header()
+        },
+        trip_updates: gtfs_rt::FeedMessage {
+            entity: vec![],
+            header: make_gtfs_header()
+        },
+    })
 }
 
 #[cfg(test)]

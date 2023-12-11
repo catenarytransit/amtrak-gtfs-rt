@@ -14,10 +14,14 @@ chrono-tz = "0.8.4"
 geojson = "0.24.1"
 gtfs = "0.1.0"
 gtfs-rt = "0.4.0"
+<<<<<<< HEAD
 gtfs-structures = "0.38.0"
 openssl = "0.10.59"
+=======
+openssl = "0.10.61"
+>>>>>>> 7f9607e4429f5200dd213a71374787b0d60dcc98
 reqwest = "0.11.22"
 rust-crypto = "0.2.36"
-serde = "1.0.192"
+serde = "1.0.193"
 serde_json = "1.0.108"
 tokio = { version = "1.34", features = ["full"] }
