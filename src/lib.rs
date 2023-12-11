@@ -42,6 +42,132 @@ pub struct AmtrakArrivalJson {
     estdepcmnt: String,
 }
 
+pub fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakArrivalJson> {
+    vec![]
+}
+
+pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::FeedEntity {
+    let geometry = feature.geometry.as_ref().unwrap();
+    let point: Option<geojson::PointType> = match geometry.value.clone() {
+        geojson::Value::Point(x) => Some(x),
+        _ => None,
+    };
+
+    let point = point.unwrap();
+
+    let speed: Option<f32> =
+        match feature.properties.as_ref().unwrap().get("Velocity") {
+            Some(speed_text) => match speed_text {
+                serde_json::value::Value::String(x) => {
+                    Some(x.as_str().parse::<f32>().unwrap() * 0.2777777)
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+
+    //unix time seconds
+    let timestamp: Option<u64> =
+        match feature.properties.as_ref().unwrap().get("updated_at") {
+            Some(timestamp_text) => match timestamp_text {
+                serde_json::value::Value::String(timestamp_text) => {
+                    Some(process_timestamp_text(&timestamp_text))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+
+    let trip_id: Option<String> =
+        match feature.properties.as_ref().unwrap().get("TrainNum") {
+            Some(a) => match a {
+                serde_json::value::Value::String(x) => Some(x.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+
+    let route_id: Option<String> =
+        match feature.properties.as_ref().unwrap().get("RouteName") {
+            Some(a) => match a {
+                serde_json::value::Value::String(x) => Some(x.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+
+    let id: Option<String> =
+        match feature.properties.as_ref().unwrap().get("TrainNum") {
+            Some(a) => match a {
+                serde_json::value::Value::String(x) => Some(x.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+
+    let bearing: Option<f32> =
+        match feature.properties.as_ref().unwrap().get("Heading") {
+            Some(bearing_text) => match bearing_text {
+                serde_json::value::Value::String(x) => match x.as_str() {
+                    "N" => Some(0.001),
+                    "NE" => Some(45.0),
+                    "E" => Some(90.0),
+                    "SE" => Some(135.0),
+                    "S" => Some(180.0),
+                    "SW" => Some(225.0),
+                    "W" => Some(270.0),
+                    "NW" => Some(315.0),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        };
+
+    let trip_desc = gtfs_rt::TripDescriptor {
+        trip_id: trip_id,
+        route_id: route_id,
+        direction_id: None,
+        start_time: None,
+        start_date: None,
+        schedule_relationship: None,
+    };
+
+    gtfs_rt::FeedEntity {
+        alert: None,
+        id: id.unwrap(),
+        is_deleted: Some(false),
+        shape: None,
+        trip_update: Some(gtfs_rt::TripUpdate {
+            vehicle: None,
+            trip: trip_desc.clone(),
+            timestamp: timestamp,
+            delay: None,
+            stop_time_update: vec![],
+            trip_properties: None,
+        }),
+        vehicle: Some(gtfs_rt::VehiclePosition {
+            stop_id: None,
+            current_status: None,
+            timestamp: timestamp,
+            congestion_level: None,
+            occupancy_status: None,
+            occupancy_percentage: None,
+            multi_carriage_details: vec![],
+            current_stop_sequence: None,
+            vehicle: None,
+            trip: Some(trip_desc.clone()),
+            position: Some(gtfs_rt::Position {
+                speed: speed,
+                odometer: None,
+                bearing: bearing,
+                latitude: point[1] as f32,
+                longitude: point[0] as f32,
+            }),
+        }),
+    }
+} 
+
 pub fn make_gtfs_header() -> gtfs_rt::FeedHeader {
     gtfs_rt::FeedHeader {
         gtfs_realtime_version: String::from("2.0"),
@@ -159,126 +285,8 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
                     entity: featurescollection
                         .features
                         .iter()
-                        .map(|feature| {
-                            let geometry = feature.geometry.as_ref().unwrap();
-                            let point: Option<geojson::PointType> = match geometry.value.clone() {
-                                geojson::Value::Point(x) => Some(x),
-                                _ => None,
-                            };
-
-                            let point = point.unwrap();
-
-                            let speed: Option<f32> =
-                                match feature.properties.as_ref().unwrap().get("Velocity") {
-                                    Some(speed_text) => match speed_text {
-                                        serde_json::value::Value::String(x) => {
-                                            Some(x.as_str().parse::<f32>().unwrap() * 0.2777777)
-                                        }
-                                        _ => None,
-                                    },
-                                    _ => None,
-                                };
-
-                            //unix time seconds
-                            let timestamp: Option<u64> =
-                                match feature.properties.as_ref().unwrap().get("updated_at") {
-                                    Some(timestamp_text) => match timestamp_text {
-                                        serde_json::value::Value::String(timestamp_text) => {
-                                            Some(process_timestamp_text(&timestamp_text))
-                                        }
-                                        _ => None,
-                                    },
-                                    _ => None,
-                                };
-
-                            let trip_id: Option<String> =
-                                match feature.properties.as_ref().unwrap().get("TrainNum") {
-                                    Some(a) => match a {
-                                        serde_json::value::Value::String(x) => Some(x.clone()),
-                                        _ => None,
-                                    },
-                                    _ => None,
-                                };
-
-                            let route_id: Option<String> =
-                                match feature.properties.as_ref().unwrap().get("RouteName") {
-                                    Some(a) => match a {
-                                        serde_json::value::Value::String(x) => Some(x.clone()),
-                                        _ => None,
-                                    },
-                                    _ => None,
-                                };
-
-                            let id: Option<String> =
-                                match feature.properties.as_ref().unwrap().get("TrainNum") {
-                                    Some(a) => match a {
-                                        serde_json::value::Value::String(x) => Some(x.clone()),
-                                        _ => None,
-                                    },
-                                    _ => None,
-                                };
-
-                            let bearing: Option<f32> =
-                                match feature.properties.as_ref().unwrap().get("Heading") {
-                                    Some(bearing_text) => match bearing_text {
-                                        serde_json::value::Value::String(x) => match x.as_str() {
-                                            "N" => Some(0.001),
-                                            "NE" => Some(45.0),
-                                            "E" => Some(90.0),
-                                            "SE" => Some(135.0),
-                                            "S" => Some(180.0),
-                                            "SW" => Some(225.0),
-                                            "W" => Some(270.0),
-                                            "NW" => Some(315.0),
-                                            _ => None,
-                                        },
-                                        _ => None,
-                                    },
-                                    _ => None,
-                                };
-
-                            let trip_desc = gtfs_rt::TripDescriptor {
-                                trip_id: trip_id,
-                                route_id: route_id,
-                                direction_id: None,
-                                start_time: None,
-                                start_date: None,
-                                schedule_relationship: None,
-                            };
-
-                            gtfs_rt::FeedEntity {
-                                alert: None,
-                                id: id.unwrap(),
-                                is_deleted: Some(false),
-                                shape: None,
-                                trip_update: Some(gtfs_rt::TripUpdate {
-                                    vehicle: None,
-                                    trip: trip_desc.clone(),
-                                    timestamp: timestamp,
-                                    delay: None,
-                                    stop_time_update: vec![],
-                                    trip_properties: None,
-                                }),
-                                vehicle: Some(gtfs_rt::VehiclePosition {
-                                    stop_id: None,
-                                    current_status: None,
-                                    timestamp: timestamp,
-                                    congestion_level: None,
-                                    occupancy_status: None,
-                                    occupancy_percentage: None,
-                                    multi_carriage_details: vec![],
-                                    current_stop_sequence: None,
-                                    vehicle: None,
-                                    trip: Some(trip_desc.clone()),
-                                    position: Some(gtfs_rt::Position {
-                                        speed: speed,
-                                        odometer: None,
-                                        bearing: bearing,
-                                        latitude: point[1] as f32,
-                                        longitude: point[0] as f32,
-                                    }),
-                                }),
-                            }
+                        .map(|feature: &geojson::Feature| {
+                            feature_to_gtfs_unified(&gtfs, feature)
                         })
                         .collect::<Vec<gtfs_rt::FeedEntity>>(),
                     header: make_gtfs_header(),
