@@ -58,6 +58,26 @@ pub fn get_speed(feature: &geojson::Feature) -> Option<f32> {
     }
 }
 
+pub fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
+    match feature.properties.as_ref().unwrap().get("Heading") {
+        Some(bearing_text) => match bearing_text {
+            serde_json::value::Value::String(x) => match x.as_str() {
+                "N" => Some(0.001),
+                "NE" => Some(45.0),
+                "E" => Some(90.0),
+                "SE" => Some(135.0),
+                "S" => Some(180.0),
+                "SW" => Some(225.0),
+                "W" => Some(270.0),
+                "NW" => Some(315.0),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
@@ -108,24 +128,7 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
             _ => None,
         };
 
-    let bearing: Option<f32> =
-        match feature.properties.as_ref().unwrap().get("Heading") {
-            Some(bearing_text) => match bearing_text {
-                serde_json::value::Value::String(x) => match x.as_str() {
-                    "N" => Some(0.001),
-                    "NE" => Some(45.0),
-                    "E" => Some(90.0),
-                    "SE" => Some(135.0),
-                    "S" => Some(180.0),
-                    "SW" => Some(225.0),
-                    "W" => Some(270.0),
-                    "NW" => Some(315.0),
-                    _ => None,
-                },
-                _ => None,
-            },
-            _ => None,
-        };
+    let bearing: Option<f32> = get_bearing(feature);
 
     let trip_desc = gtfs_rt::TripDescriptor {
         trip_id: trip_id,
