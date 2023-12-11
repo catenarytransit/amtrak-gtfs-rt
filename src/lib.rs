@@ -6,8 +6,8 @@ use std::time::SystemTime;
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResults {
-    trip_updates: gtfs_rt::FeedMessage,
-    vehicle_positions: gtfs_rt::FeedMessage,
+    pub trip_updates: gtfs_rt::FeedMessage,
+    pub vehicle_positions: gtfs_rt::FeedMessage,
 }
 
 #[derive(Clone, Debug)]
