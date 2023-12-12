@@ -2,8 +2,8 @@ use chrono::NaiveDate;
 use chrono::TimeZone;
 use geojson::FeatureCollection;
 use gtfs_structures::Gtfs;
-use std::time::SystemTime;
 use std::collections::HashMap;
+use std::time::SystemTime;
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResults {
@@ -44,7 +44,7 @@ pub struct AmtrakArrivalJson {
     estdepcmnt: String,
 }
 
-pub fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakArrivalJson> {
+fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakArrivalJson> {
     let mut amtrak_arrival_jsons = vec![];
 
     for i in 0 as i32..100 as i32 {
@@ -54,13 +54,14 @@ pub fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<Amtr
         match feature.properties.as_ref().unwrap().get(key.as_str()) {
             Some(station_text) => match station_text {
                 serde_json::value::Value::String(station_text) => {
-                    let amtrak_arrival: Result<AmtrakArrivalJson, serde_json::Error> = serde_json::from_str(&station_text);
+                    let amtrak_arrival: Result<AmtrakArrivalJson, serde_json::Error> =
+                        serde_json::from_str(&station_text);
 
                     if amtrak_arrival.is_ok() {
                         amtrak_arrival_jsons.push(amtrak_arrival.unwrap());
                     }
                 }
-                _ => {},
+                _ => {}
             },
             _ => {}
         };
@@ -69,7 +70,7 @@ pub fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<Amtr
     amtrak_arrival_jsons
 }
 
-pub fn get_speed(feature: &geojson::Feature) -> Option<f32> {
+fn get_speed(feature: &geojson::Feature) -> Option<f32> {
     match feature.properties.as_ref().unwrap().get("Velocity") {
         Some(speed_text) => match speed_text {
             serde_json::value::Value::String(x) => {
@@ -81,7 +82,7 @@ pub fn get_speed(feature: &geojson::Feature) -> Option<f32> {
     }
 }
 
-pub fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
+fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
     match feature.properties.as_ref().unwrap().get("Heading") {
         Some(bearing_text) => match bearing_text {
             serde_json::value::Value::String(x) => match x.as_str() {
@@ -108,17 +109,20 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
         _ => None,
     };
 
-    let long_name_to_route_id_hashmap:HashMap<String, String> = HashMap::from_iter(gtfs.routes.iter().map(|(string, route)| {
-        (route.long_name.clone(), route.id.clone())
-    }));
+    let long_name_to_route_id_hashmap: HashMap<String, String> = HashMap::from_iter(
+        gtfs.routes
+            .iter()
+            .map(|(string, route)| (route.long_name.clone(), route.id.clone())),
+    );
 
-    let mut trip_name_to_id_hashmap:HashMap<String, Vec<String>> = HashMap::new();
+    let mut trip_name_to_id_hashmap: HashMap<String, Vec<String>> = HashMap::new();
 
     for (trip_id, trip) in gtfs.trips.iter() {
         if (trip.trip_short_name.is_some()) {
-            trip_name_to_id_hashmap.entry(trip.trip_short_name.as_ref().unwrap().clone())
-        .and_modify(|list| list.push(trip_id.clone()))
-        .or_insert(vec![trip_id.clone()]);
+            trip_name_to_id_hashmap
+                .entry(trip.trip_short_name.as_ref().unwrap().clone())
+                .and_modify(|list| list.push(trip_id.clone()))
+                .or_insert(vec![trip_id.clone()]);
         }
     }
 
@@ -131,47 +135,64 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
     let arrivals_raw = feature_to_amtrak_arrival_structs(feature);
 
     //unix time seconds
-    let timestamp: Option<u64> =
-        match feature.properties.as_ref().unwrap().get("updated_at") {
-            Some(timestamp_text) => match timestamp_text {
-                serde_json::value::Value::String(timestamp_text) => {
-                    Some(process_timestamp_text(&timestamp_text))
-                }
-                _ => None,
-            },
+    let timestamp: Option<u64> = match feature.properties.as_ref().unwrap().get("updated_at") {
+        Some(timestamp_text) => match timestamp_text {
+            serde_json::value::Value::String(timestamp_text) => {
+                Some(process_timestamp_text(&timestamp_text))
+            }
             _ => None,
-        };
+        },
+        _ => None,
+    };
 
-    let trip_id: Option<String> =
-        match feature.properties.as_ref().unwrap().get("TrainNum") {
-            Some(a) => match a {
-                serde_json::value::Value::String(x) => Some(x.clone()),
-                _ => None,
-            },
+    let trip_name: Option<String> = match feature.properties.as_ref().unwrap().get("TrainNum") {
+        Some(a) => match a {
+            serde_json::value::Value::String(x) => Some(x.clone()),
             _ => None,
-        };
+        },
+        _ => None,
+    };
 
-    let route_name: Option<String> =
-        match feature.properties.as_ref().unwrap().get("RouteName") {
-            Some(a) => match a {
-                serde_json::value::Value::String(x) => Some(x.clone()),
-                _ => None,
-            },
-            _ => None,
-        };
+    let trip_id: Option<String> = match trip_name {
+        Some(x) => {
+            let hashmapresults = trip_name_to_id_hashmap.get(&x);
 
-    let id: Option<String> =
-        match feature.properties.as_ref().unwrap().get("TrainNum") {
-            Some(a) => match a {
-                serde_json::value::Value::String(x) => Some(x.clone()),
-                _ => None,
-            },
+            match hashmapresults {
+                Some(hashmapresults) => {
+                    match hashmapresults.len() {
+                        1 => Some(hashmapresults[0].clone()),
+                        _ => {
+                            Some(hashmapresults[0].clone())
+                        }
+                    }
+                },
+                None => None,
+            }
+        }
+        None => None,
+    };
+
+    let route_name: Option<String> = match feature.properties.as_ref().unwrap().get("RouteName") {
+        Some(a) => match a {
+            serde_json::value::Value::String(x) => Some(x.clone()),
             _ => None,
-        };
+        },
+        _ => None,
+    };
+
+    let id: Option<String> = match feature.properties.as_ref().unwrap().get("TrainNum") {
+        Some(a) => match a {
+            serde_json::value::Value::String(x) => Some(x.clone()),
+            _ => None,
+        },
+        _ => None,
+    };
 
     let route_id: Option<String> = match route_name {
-        Some(route_name) => long_name_to_route_id_hashmap.get(&route_name.clone()).cloned(),
-        None => None
+        Some(route_name) => long_name_to_route_id_hashmap
+            .get(&route_name.clone())
+            .cloned(),
+        None => None,
     };
 
     let bearing: Option<f32> = get_bearing(feature);
@@ -218,7 +239,7 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
             }),
         }),
     }
-} 
+}
 
 pub fn make_gtfs_header() -> gtfs_rt::FeedHeader {
     gtfs_rt::FeedHeader {
@@ -290,7 +311,6 @@ pub async fn fetch_amtrak_gtfs_rt(
 
     match joined_res {
         Ok(joined_res) => {
-
             for feedentity in joined_res.unified_feed.entity {
                 vehicles.push(feedentity.clone());
                 trips.push(feedentity.clone());
@@ -306,7 +326,7 @@ pub async fn fetch_amtrak_gtfs_rt(
                     header: joined_res.unified_feed.header.clone(),
                 },
             })
-        },
+        }
         Err(x) => Err(x),
     }
 }
@@ -337,9 +357,7 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
                     entity: featurescollection
                         .features
                         .iter()
-                        .map(|feature: &geojson::Feature| {
-                            feature_to_gtfs_unified(&gtfs, feature)
-                        })
+                        .map(|feature: &geojson::Feature| feature_to_gtfs_unified(&gtfs, feature))
                         .collect::<Vec<gtfs_rt::FeedEntity>>(),
                     header: make_gtfs_header(),
                 },
