@@ -112,6 +112,18 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
         (route.long_name.clone(), route.id.clone())
     }));
 
+    let mut trip_name_to_id_hashmap:HashMap<String, Vec<String>> = HashMap::new();
+
+    for (trip_id, trip) in gtfs.trips.iter() {
+        if (trip.trip_short_name.is_some()) {
+            trip_name_to_id_hashmap.entry(trip.trip_short_name.as_ref().unwrap().clone())
+        .and_modify(|list| list.push(trip_id.clone()))
+        .or_insert(vec![trip_id.clone()]);
+        }
+    }
+
+    let trip_name_to_id_hashmap = trip_name_to_id_hashmap;
+
     let point = point.unwrap();
 
     let speed: Option<f32> = get_speed(feature);
