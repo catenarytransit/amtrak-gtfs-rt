@@ -1,11 +1,11 @@
+use chrono::Datelike;
 use chrono::NaiveDate;
 use chrono::TimeZone;
+use chrono::Weekday;
 use geojson::FeatureCollection;
 use gtfs_structures::Gtfs;
 use std::collections::HashMap;
 use std::time::SystemTime;
-use chrono::Datelike;
-use chrono::Weekday;
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResults {
@@ -45,7 +45,6 @@ pub struct AmtrakArrivalJson {
     //"estdepcmnt":"ON TIME"
     estdepcmnt: Option<String>,
 }
-
 
 fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakArrivalJson> {
     let mut amtrak_arrival_jsons = vec![];
@@ -108,14 +107,14 @@ fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
 fn option_i64_to_i32(x: Option<i64>) -> Option<i32> {
     match x {
         Some(x) => Some(x as i32),
-        None => None
+        None => None,
     }
 }
 
 fn option_i32_to_i64(x: Option<i32>) -> Option<i64> {
     match x {
         Some(x) => Some(x as i64),
-        None => None
+        None => None,
     }
 }
 
@@ -149,36 +148,33 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
 
     let speed: Option<f32> = get_speed(feature);
 
-    let arrivals: Vec<gtfs_rt::trip_update::StopTimeUpdate> = feature_to_amtrak_arrival_structs(feature).iter().map(|feature| {
-
-        gtfs_rt::trip_update::StopTimeUpdate {
-            stop_sequence: None,
-            stop_id: Some(feature.code.clone()),
-            arrival: match &feature.estarr {
-                Some(estarr) => {
-                    Some(gtfs_rt::trip_update::StopTimeEvent {
+    let arrivals: Vec<gtfs_rt::trip_update::StopTimeUpdate> =
+        feature_to_amtrak_arrival_structs(feature)
+            .iter()
+            .map(|feature| gtfs_rt::trip_update::StopTimeUpdate {
+                stop_sequence: None,
+                stop_id: Some(feature.code.clone()),
+                arrival: match &feature.estarr {
+                    Some(estarr) => Some(gtfs_rt::trip_update::StopTimeEvent {
                         delay: None,
-                        time: option_i32_to_i64(time_and_tz_to_unix(&estarr,&feature.tz)),
-                        uncertainty: None
-                    })
+                        time: option_i32_to_i64(time_and_tz_to_unix(&estarr, &feature.tz)),
+                        uncertainty: None,
+                    }),
+                    None => None,
                 },
-                None => None
-            },
-            departure: match &feature.estdep {
-                Some(estdep) => {
-                    Some(gtfs_rt::trip_update::StopTimeEvent {
+                departure: match &feature.estdep {
+                    Some(estdep) => Some(gtfs_rt::trip_update::StopTimeEvent {
                         delay: None,
-                        time: option_i32_to_i64(time_and_tz_to_unix(&estdep,&feature.tz)),
-                        uncertainty: None
-                    })
+                        time: option_i32_to_i64(time_and_tz_to_unix(&estdep, &feature.tz)),
+                        uncertainty: None,
+                    }),
+                    None => None,
                 },
-                None => None
-            },
-            departure_occupancy_status: None,
-            schedule_relationship: None,
-            stop_time_properties:None,
-        }
-    }).collect::<Vec<gtfs_rt::trip_update::StopTimeUpdate>>();
+                departure_occupancy_status: None,
+                schedule_relationship: None,
+                stop_time_properties: None,
+            })
+            .collect::<Vec<gtfs_rt::trip_update::StopTimeUpdate>>();
 
     //unix time seconds
     let timestamp: Option<u64> = match feature.properties.as_ref().unwrap().get("updated_at") {
@@ -205,7 +201,8 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
             _ => None,
         },
         _ => None,
-    }.unwrap();
+    }
+    .unwrap();
 
     let origin_time_string = match feature.properties.as_ref().unwrap().get("OrigSchDep") {
         Some(a) => match a {
@@ -213,7 +210,8 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
             _ => None,
         },
         _ => None,
-    }.unwrap();
+    }
+    .unwrap();
 
     let origin_local_time = origin_departure(&origin_time_string, &origin_tz);
 
@@ -228,36 +226,36 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
                     match hashmapresults.len() {
                         1 => Some(hashmapresults[0].clone()),
                         _ => {
-                            let possible_results = hashmapresults.iter().filter(|trip_id_candidate| 
-                                {
-                                let trip = gtfs.trips.get(trip_id_candidate.clone()).unwrap();
+                            let possible_results = hashmapresults
+                                .iter()
+                                .filter(|trip_id_candidate| {
+                                    let trip = gtfs.trips.get(trip_id_candidate.clone()).unwrap();
 
-                                let calendar = gtfs.calendar.get(&trip.service_id).unwrap();
+                                    let calendar = gtfs.calendar.get(&trip.service_id).unwrap();
 
-                                match origin_weekday {
-                                    Weekday::Mon => calendar.monday,
-                                    Weekday::Tue => calendar.tuesday,
-                                    Weekday::Wed => calendar.wednesday,
-                                    Weekday::Thu => calendar.thursday,
-                                    Weekday::Fri => calendar.friday,
-                                    Weekday::Sat => calendar.saturday,
-                                    Weekday::Sun => calendar.sunday,
-                                }
-                                //Seven days a week
-                                //Every hour, every minute, every second
-                                //You know night after night
-                                //I'll be lovin' you right, seven days a week
-
-                                }
-                            ).collect::<Vec<&String>>();
+                                    match origin_weekday {
+                                        Weekday::Mon => calendar.monday,
+                                        Weekday::Tue => calendar.tuesday,
+                                        Weekday::Wed => calendar.wednesday,
+                                        Weekday::Thu => calendar.thursday,
+                                        Weekday::Fri => calendar.friday,
+                                        Weekday::Sat => calendar.saturday,
+                                        Weekday::Sun => calendar.sunday,
+                                    }
+                                    //Seven days a week
+                                    //Every hour, every minute, every second
+                                    //You know night after night
+                                    //I'll be lovin' you right, seven days a week
+                                })
+                                .collect::<Vec<&String>>();
 
                             match possible_results.len() {
                                 0 => None,
-                                _ => Some(possible_results[0].clone())
+                                _ => Some(possible_results[0].clone()),
                             }
                         }
                     }
-                },
+                }
                 None => None,
             }
         }
@@ -363,7 +361,7 @@ fn tz_str_to_tz(tz: &str) -> Option<chrono_tz::Tz> {
         "P" => Some(chrono_tz::America::Los_Angeles),
         "C" => Some(chrono_tz::America::Chicago),
         "A" => Some(chrono_tz::America::Phoenix),
-        _ => None
+        _ => None,
     }
 }
 
@@ -396,11 +394,12 @@ fn time_and_tz_to_unix(timestamp_text: &String, tz: &String) -> Option<i32> {
     )
     .unwrap();
 
-    let local_time_representation = tz_str_to_tz(tz).unwrap()
+    let local_time_representation = tz_str_to_tz(tz)
+        .unwrap()
         .from_local_datetime(&native_dt)
         .unwrap();
 
-        Some(local_time_representation.timestamp().try_into().unwrap())
+    Some(local_time_representation.timestamp().try_into().unwrap())
 }
 
 //for origin departure conversion to local time representation
@@ -432,7 +431,8 @@ pub fn origin_departure(timestamp_text: &str, tz: &str) -> chrono::DateTime<chro
     )
     .unwrap();
 
-    let local_time_representation = tz_str_to_tz(tz).unwrap()
+    let local_time_representation = tz_str_to_tz(tz)
+        .unwrap()
         .from_local_datetime(&native_dt)
         .unwrap();
 
