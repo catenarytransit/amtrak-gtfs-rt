@@ -4,6 +4,8 @@ use geojson::FeatureCollection;
 use gtfs_structures::Gtfs;
 use std::collections::HashMap;
 use std::time::SystemTime;
+use chrono::Datelike;
+use chrono::Weekday;
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResults {
@@ -148,6 +150,7 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
     let speed: Option<f32> = get_speed(feature);
 
     let arrivals: Vec<gtfs_rt::trip_update::StopTimeUpdate> = feature_to_amtrak_arrival_structs(feature).iter().map(|feature| {
+
         gtfs_rt::trip_update::StopTimeUpdate {
             stop_sequence: None,
             stop_id: Some(feature.code.clone()),
@@ -196,6 +199,26 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
         _ => None,
     };
 
+    let origin_tz = match feature.properties.as_ref().unwrap().get("OriginTZ") {
+        Some(a) => match a {
+            serde_json::value::Value::String(x) => Some(x.clone()),
+            _ => None,
+        },
+        _ => None,
+    }.unwrap();
+
+    let origin_time_string = match feature.properties.as_ref().unwrap().get("OrigSchDep") {
+        Some(a) => match a {
+            serde_json::value::Value::String(x) => Some(x.clone()),
+            _ => None,
+        },
+        _ => None,
+    }.unwrap();
+
+    let origin_local_time = origin_departure(&origin_time_string, &origin_tz);
+
+    let origin_weekday = origin_local_time.weekday();
+
     let trip_id: Option<String> = match trip_name {
         Some(x) => {
             let hashmapresults = trip_name_to_id_hashmap.get(&x);
@@ -205,7 +228,33 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
                     match hashmapresults.len() {
                         1 => Some(hashmapresults[0].clone()),
                         _ => {
-                            Some(hashmapresults[0].clone())
+                            let possible_results = hashmapresults.iter().filter(|trip_id_candidate| 
+                                {
+                                let trip = gtfs.trips.get(trip_id_candidate.clone()).unwrap();
+
+                                let calendar = gtfs.calendar.get(&trip.service_id).unwrap();
+
+                                match origin_weekday {
+                                    Weekday::Mon => calendar.monday,
+                                    Weekday::Tue => calendar.tuesday,
+                                    Weekday::Wed => calendar.wednesday,
+                                    Weekday::Thu => calendar.thursday,
+                                    Weekday::Fri => calendar.friday,
+                                    Weekday::Sat => calendar.saturday,
+                                    Weekday::Sun => calendar.sunday,
+                                }
+                                //Seven days a week
+                                //Every hour, every minute, every second
+                                //You know night after night
+                                //I'll be lovin' you right, seven days a week
+
+                                }
+                            ).collect::<Vec<&String>>();
+
+                            match possible_results.len() {
+                                0 => None,
+                                _ => Some(possible_results[0].clone())
+                            }
                         }
                     }
                 },
@@ -354,6 +403,41 @@ fn time_and_tz_to_unix(timestamp_text: &String, tz: &String) -> Option<i32> {
         Some(local_time_representation.timestamp().try_into().unwrap())
 }
 
+//for origin departure conversion to local time representation
+pub fn origin_departure(timestamp_text: &str, tz: &str) -> chrono::DateTime<chrono_tz::Tz> {
+    let parts = timestamp_text.split(" ").collect::<Vec<&str>>();
+
+    let date_parts = parts[0]
+        .split("/")
+        .map(|x| x.parse::<i32>().unwrap())
+        .collect::<Vec<i32>>();
+
+    let time_parts = parts[1]
+        .split(":")
+        .map(|x| x.parse::<u8>().unwrap())
+        .collect::<Vec<u8>>();
+
+    let is_pm = parts[2] == "PM";
+
+    let native_dt = NaiveDate::from_ymd_opt(
+        date_parts[2],
+        date_parts[0].try_into().unwrap(),
+        date_parts[1].try_into().unwrap(),
+    )
+    .unwrap()
+    .and_hms_opt(
+        convert_12_to_24_hour(time_parts[0], is_pm).into(),
+        time_parts[1].into(),
+        time_parts[2].into(),
+    )
+    .unwrap();
+
+    let local_time_representation = tz_str_to_tz(tz).unwrap()
+        .from_local_datetime(&native_dt)
+        .unwrap();
+
+    local_time_representation
+}
 
 //time is formatted 11/18/2023 4:58:09 PM
 pub fn process_timestamp_text(timestamp_text: &str) -> u64 {
