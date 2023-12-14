@@ -76,7 +76,7 @@ fn get_speed(feature: &geojson::Feature) -> Option<f32> {
     match feature.properties.as_ref().unwrap().get("Velocity") {
         Some(speed_text) => match speed_text {
             serde_json::value::Value::String(x) => {
-                Some(x.as_str().parse::<f32>().unwrap() * 0.2777777)
+                Some(x.as_str().parse::<f32>().unwrap() * 0.44704)
             }
             _ => None,
         },
