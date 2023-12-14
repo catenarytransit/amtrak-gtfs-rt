@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "amtrak-gtfs-rt"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "amtk",
  "amtrak-api",
