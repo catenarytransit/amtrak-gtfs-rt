@@ -350,7 +350,10 @@ fn convert_12_to_24_hour(hour: u8, pm: bool) -> u8 {
             12 => 0,
             _ => hour + 12,
         },
-        true => hour + 12,
+        true => match hour {
+            12 => 12,
+            _ => hour + 12
+        },
     }
 }
 
@@ -418,13 +421,16 @@ pub fn origin_departure(timestamp_text: &str, tz: &str) -> chrono::DateTime<chro
 
     let is_pm = parts[2] == "PM";
 
-    let native_dt = NaiveDate::from_ymd_opt(
+    let native_d = NaiveDate::from_ymd_opt(
         date_parts[2],
         date_parts[0].try_into().unwrap(),
         date_parts[1].try_into().unwrap(),
     )
-    .unwrap()
-    .and_hms_opt(
+    .unwrap();
+
+    //println!("{}, {:?}, {}",convert_12_to_24_hour(time_parts[0], is_pm), time_parts, parts[2]);
+    
+    let native_dt = native_d.and_hms_opt(
         convert_12_to_24_hour(time_parts[0], is_pm).into(),
         time_parts[1].into(),
         time_parts[2].into(),
