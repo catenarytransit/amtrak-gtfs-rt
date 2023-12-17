@@ -554,7 +554,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_amtrak() {
-        let client = reqwest::Client::new();
+        let client =  reqwest::ClientBuilder::new()
+                .deflate(true)
+                .gzip(true)
+                .brotli(true)
+                .build().unwrap();
 
         println!("download and process amtrak gtfs file");
 
