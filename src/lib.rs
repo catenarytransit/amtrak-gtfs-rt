@@ -104,13 +104,6 @@ fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
     }
 }
 
-fn option_i64_to_i32(x: Option<i64>) -> Option<i32> {
-    match x {
-        Some(x) => Some(x as i32),
-        None => None,
-    }
-}
-
 fn option_i32_to_i64(x: Option<i32>) -> Option<i64> {
     match x {
         Some(x) => Some(x as i64),
