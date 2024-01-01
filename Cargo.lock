@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "amtrak-gtfs-rt"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "amtk",
  "amtrak-api",
@@ -101,7 +101,6 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "geojson",
- "gtfs",
  "gtfs-rt",
  "gtfs-structures",
  "openssl",
@@ -771,12 +770,6 @@ name = "gimli"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fb8d784f27acf97159b40fc4db5ecd8aa23b9ad5ef69cdd136d3bc80665f0c0"
-
-[[package]]
-name = "gtfs"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b3992066d09a9e68fb7579d38533eb2488de811493eec4fc8639b8facb5300f"
 
 [[package]]
 name = "gtfs-rt"
