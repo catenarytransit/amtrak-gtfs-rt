@@ -1,9 +1,3 @@
-use chrono::{Datelike, NaiveDateTime, TimeZone, Weekday};
-use geojson::FeatureCollection;
-use gtfs_structures::Gtfs;
-use std::collections::HashMap;
-use std::time::SystemTime;
-
 //! # amtrak-gtfs-rt
 //!Decrypts Amtrak's GTFS-RT
 //!
@@ -38,6 +32,12 @@ use std::time::SystemTime;
 //!This software package decrypts the Amtrak track-a-train json data and performs lookups of trip information in the GTFS schedule to match each vehicle with it's route_id and trip_id.
 
 //!Pull requests are welcome!
+
+use chrono::{Datelike, NaiveDateTime, TimeZone, Weekday};
+use geojson::FeatureCollection;
+use gtfs_structures::Gtfs;
+use std::collections::HashMap;
+use std::time::SystemTime;
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResults {
