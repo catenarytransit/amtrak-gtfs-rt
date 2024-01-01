@@ -21,6 +21,7 @@ geojson = "0.24"
 gtfs-rt = "0.4"
 gtfs-structures = "0.39"
 openssl = "0.10"
+prost = "0.11"
 reqwest = {version = "0.11", features = ["gzip","brotli","rustls-tls","deflate","cookies","mime_guess"]}
 rust-crypto = "0.2"
 serde = "1.0"

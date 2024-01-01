@@ -104,6 +104,7 @@ dependencies = [
  "gtfs-rt",
  "gtfs-structures",
  "openssl",
+ "prost",
  "reqwest",
  "rust-crypto",
  "serde",
