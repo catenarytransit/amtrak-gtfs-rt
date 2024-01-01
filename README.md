@@ -8,13 +8,6 @@ Here's an example of some working code!
 extern crate amtrak_gtfs_rt;
 
 use prost::Message;
-use redis::Client as RedisClient;
-
-use kactus::insert::insert_gtfs_rt;
-use kactus::insert::insert_gtfs_rt_bytes;
-
-use kactus::aspen::send_to_aspen;
-
 use gtfs_structures::Gtfs;
 
 #[tokio::main]
