@@ -34,8 +34,8 @@ This software package decrypts the Amtrak track-a-train json data and performs l
 
 Pull requests are welcome!
 
-## Capital Cooridor Exception
-Note that the Metropolitan Transportation Commission also publishes Capital Cooridor in their own feed.
-https://511.org/open-data/transit provides Capital Cooridor as "CC". This data refreshes more often (and is closer in location & time), and shows locomotive numbers.
-For this reason, you may wish to remove Capital Cooridor from this feed.
-Thus, we've included a function `filter_capital_cooridor()` which takes in any `gtfs_rt::FeedMessage` and removes CC vehicles and trips.
+## Capital Corridor Exception
+Note that the Metropolitan Transportation Commission also publishes Capital Corridor in their own feed.
+https://511.org/open-data/transit provides Capital Corridor as "CC". This data refreshes more often (and is closer in location & time), and shows locomotive numbers.
+For this reason, you may wish to remove Capital Corridor from this feed.
+Thus, we've included a function `filter_capital_corridor()` which takes in any `gtfs_rt::FeedMessage` and removes CC vehicles and trips.

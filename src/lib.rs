@@ -32,6 +32,11 @@
 //!    }
 //!}
 //!```
+//! 
+//! Note that the Metropolitan Transportation Commission also publishes Capital Corridor in their own feed.
+//! https://511.org/open-data/transit provides Capital Corridor as "CC". This data refreshes more often (and is closer in location & time), and shows locomotive numbers.
+//! For this reason, you may wish to remove Capital Corridor from this feed.
+//! Thus, we've included a function `filter_capital_corridor()` which takes in any `gtfs_rt::FeedMessage` and removes CC vehicles and trips.
 
 
 use chrono::{Datelike, NaiveDateTime, TimeZone, Weekday};
@@ -40,6 +45,7 @@ use gtfs_structures::Gtfs;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+//Written by Kyler Chin - Catenary Transit Initiatives.
 pub fn filter_capital_corridor(input: gtfs_rt::FeedMessage) -> gtfs_rt::FeedMessage {
     let cc_route_id = "84";
 

@@ -1,6 +1,6 @@
 [package]
 name = "amtrak-gtfs-rt"
-version = "0.1.16"
+version = "0.1.17"
 license = "AGPL-3.0"
 description = "Converts Amtrak Track-A-Train to valid GTFS-rt vehicle and trip information"
 edition = "2021"
