@@ -33,3 +33,9 @@ async fn main() {
 This software package decrypts the Amtrak track-a-train json data and performs lookups of trip information in the GTFS schedule to match each vehicle with it's route_id and trip_id.
 
 Pull requests are welcome!
+
+## Capital Cooridor Exception
+Note that the Metropolitan Transportation Commission also publishes Capital Cooridor in their own feed.
+https://511.org/open-data/transit provides Capital Cooridor as "CC". This data refreshes more often (and is closer in location & time), and shows locomotive numbers.
+For this reason, you may wish to remove Capital Cooridor from this feed.
+Thus, we've included a function `filter_capital_cooridor()` which takes in any `gtfs_rt::FeedMessage` and removes CC vehicles and trips.

@@ -1,5 +1,8 @@
 //! # amtrak-gtfs-rt
 //!Decrypts Amtrak's GTFS-RT
+//! 
+//!This software package decrypts the Amtrak track-a-train json data and performs lookups of trip information in the GTFS schedule to match each vehicle with it's route_id and trip_id.
+//!Pull requests are welcome!
 //!
 //!A valid Amtrak GTFS structure must be passed into the function to work.
 //!
@@ -30,15 +33,52 @@
 //!}
 //!```
 
-//!This software package decrypts the Amtrak track-a-train json data and performs lookups of trip information in the GTFS schedule to match each vehicle with it's route_id and trip_id.
-
-//!Pull requests are welcome!
 
 use chrono::{Datelike, NaiveDateTime, TimeZone, Weekday};
 use geojson::FeatureCollection;
 use gtfs_structures::Gtfs;
 use std::collections::HashMap;
 use std::time::SystemTime;
+
+pub fn filter_capital_corridor(input: gtfs_rt::FeedMessage) -> gtfs_rt::FeedMessage {
+    let cc_route_id = "84";
+
+    gtfs_rt::FeedMessage {
+        entity: input
+            .entity
+            .into_iter()
+            .filter(|item| {
+                if item.vehicle.is_some() {
+                    let vehicle = item.vehicle.as_ref().unwrap();
+                    if vehicle.trip.is_some() {
+                        let trip = vehicle.trip.as_ref().unwrap();
+                        if trip.route_id.is_some() {
+                            if trip.route_id.as_ref().unwrap().as_str() == cc_route_id {
+                                return false;
+                            }
+                        }
+                    }
+                }
+
+                if item.trip_update.is_some() {
+                    let trip_update = item.trip_update.as_ref().unwrap();
+                    let trip = &trip_update.trip;
+
+                    if trip.route_id.is_some() {
+                        let route_id = trip.route_id.as_ref().unwrap();
+
+                        if route_id == cc_route_id {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            })
+            .collect::<Vec<gtfs_rt::FeedEntity>>(),
+        header: input.header,
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResults {
