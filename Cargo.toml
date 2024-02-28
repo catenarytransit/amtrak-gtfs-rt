@@ -1,6 +1,6 @@
 [package]
 name = "amtrak-gtfs-rt"
-version = "0.1.18"
+version = "0.1.19"
 license = "AGPL-3.0"
 description = "Converts Amtrak Track-A-Train to valid GTFS-rt vehicle and trip information"
 edition = "2021"
@@ -28,4 +28,6 @@ reqwest = {version = "0.11", features = ["gzip","brotli","rustls-tls","deflate",
 rust-crypto = "0.2"
 serde = "1.0"
 serde_json = "1.0"
+
+[dev-dependencies]
 tokio = { version = "1.35", features = ["full"] }
