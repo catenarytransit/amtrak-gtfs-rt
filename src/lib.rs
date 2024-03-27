@@ -1,5 +1,8 @@
 //! # amtrak-gtfs-rt
 //!Decrypts Amtrak's GTFS-RT
+//! 
+//!This software package decrypts the Amtrak track-a-train json data and performs lookups of trip information in the GTFS schedule to match each vehicle with it's route_id and trip_id.
+//!Pull requests are welcome!
 //!
 //!A valid Amtrak GTFS structure must be passed into the function to work.
 //!
@@ -29,16 +32,59 @@
 //!    }
 //!}
 //!```
+//! 
+//! Note that the Metropolitan Transportation Commission also publishes Capital Corridor in their own feed.
+//! https://511.org/open-data/transit provides Capital Corridor as "CC". This data refreshes more often (and is closer in location & time), and shows locomotive numbers.
+//! For this reason, you may wish to remove Capital Corridor from this feed.
+//! Thus, we've included a function `filter_capital_corridor()` which takes in any `gtfs_rt::FeedMessage` and removes CC vehicles and trips.
 
-//!This software package decrypts the Amtrak track-a-train json data and performs lookups of trip information in the GTFS schedule to match each vehicle with it's route_id and trip_id.
-
-//!Pull requests are welcome!
 
 use chrono::{Datelike, NaiveDateTime, TimeZone, Weekday};
 use geojson::FeatureCollection;
 use gtfs_structures::Gtfs;
 use std::collections::HashMap;
 use std::time::SystemTime;
+
+//Written by Kyler Chin - Catenary Transit Initiatives.
+pub fn filter_capital_corridor(input: gtfs_rt::FeedMessage) -> gtfs_rt::FeedMessage {
+    let cc_route_id = "84";
+
+    gtfs_rt::FeedMessage {
+        entity: input
+            .entity
+            .into_iter()
+            .filter(|item| {
+                if item.vehicle.is_some() {
+                    let vehicle = item.vehicle.as_ref().unwrap();
+                    if vehicle.trip.is_some() {
+                        let trip = vehicle.trip.as_ref().unwrap();
+                        if trip.route_id.is_some() {
+                            if trip.route_id.as_ref().unwrap().as_str() == cc_route_id {
+                                return false;
+                            }
+                        }
+                    }
+                }
+
+                if item.trip_update.is_some() {
+                    let trip_update = item.trip_update.as_ref().unwrap();
+                    let trip = &trip_update.trip;
+
+                    if trip.route_id.is_some() {
+                        let route_id = trip.route_id.as_ref().unwrap();
+
+                        if route_id == cc_route_id {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            })
+            .collect::<Vec<gtfs_rt::FeedEntity>>(),
+        header: input.header,
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResults {
@@ -249,7 +295,7 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
                             let possible_results = hashmap_results
                                 .iter()
                                 .filter(|trip_id_candidate| {
-                                    let trip = gtfs.trips.get(trip_id_candidate.clone()).unwrap();
+                                    let trip = gtfs.trips.get(trip_id_candidate.as_str()).unwrap();
 
                                     let calendar = gtfs.calendar.get(&trip.service_id).unwrap();
 
