@@ -147,7 +147,8 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
     let long_name_to_route_id_hashmap: HashMap<String, String> = HashMap::from_iter(
         gtfs.routes
             .iter()
-            .map(|(_string, route)| (route.long_name.clone(), route.id.clone())),
+            .filter(|(_, route)| route.long_name.is_some())
+            .map(|(_string, route)| (route.long_name.as_ref().unwrap().clone(), route.id.clone())),
     );
 
     let mut trip_name_to_id_hashmap: HashMap<String, Vec<String>> = HashMap::new();
@@ -312,6 +313,7 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
         direction_id: None,
         start_time: None,
         start_date: None,
+        modified_trip: None,
         schedule_relationship: None,
     };
 
@@ -319,6 +321,8 @@ pub fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_
         alert: None,
         id: id.unwrap(),
         is_deleted: Some(false),
+        trip_modifications: None,
+        stop: None,
         shape: None,
         trip_update: Some(gtfs_rt::TripUpdate {
             vehicle: None,
