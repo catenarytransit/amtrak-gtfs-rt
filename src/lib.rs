@@ -505,11 +505,11 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
         Ok(raw_data) => {
             //println!("Raw data successfully downloaded");
 
-            let decrypted_string = amtk::decrypt(raw_data.text().await.unwrap().as_str()).unwrap();
+            let decrypted_string = amtk::decrypt(raw_data.text().await.unwrap().as_str())?;
 
-            let geojson: geojson::GeoJson = decrypted_string.parse::<geojson::GeoJson>().unwrap();
+            let geojson: geojson::GeoJson = decrypted_string.parse::<geojson::GeoJson>()?;
             let features_collection: FeatureCollection =
-                FeatureCollection::try_from(geojson).unwrap();
+                FeatureCollection::try_from(geojson)?;
 
             //println!("Successfully decrypted");
             //println!("{}", decrypted_string);
