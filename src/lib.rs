@@ -123,6 +123,32 @@ pub struct AmtrakArrivalJson {
     estdepcmnt: Option<String>,
 }
 
+fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakArrivalJson> {
+    let mut amtrak_arrival_jsons = vec![];
+
+    for i in 0i32..100i32 {
+        let mut key = String::from("Station");
+        key.push_str(&i.to_string());
+
+        match feature.properties.as_ref().unwrap().get(key.as_str()) {
+            Some(station_text) => match station_text {
+                serde_json::value::Value::String(station_text) => {
+                    let amtrak_arrival: Result<AmtrakArrivalJson, serde_json::Error> =
+                        serde_json::from_str(&station_text);
+
+                    if amtrak_arrival.is_ok() {
+                        amtrak_arrival_jsons.push(amtrak_arrival.unwrap());
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        };
+    }
+
+    amtrak_arrival_jsons
+}
+
 fn get_speed(feature: &geojson::Feature) -> Option<f32> {
     match feature.properties.as_ref().unwrap().get("Velocity") {
         Some(speed_text) => match speed_text {
@@ -155,7 +181,7 @@ fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
     }
 }
 
-fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature, stop_times: &HashMap<(String, NaiveDate), RootTripData>) -> gtfs_rt::FeedEntity {
+fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
         geojson::Value::Point(x) => Some(x),
@@ -223,53 +249,33 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature, stop_times: 
     }
     .unwrap();
 
-    let arrivals: Vec<gtfs_rt::trip_update::StopTimeUpdate> = match &trip_name {
-        Some(trip_name) => {
-            match stop_times.get(&(trip_name.clone(), NaiveDate::parse_from_str(origin_time_string.split(" ").nth(0).unwrap(), "%m/%d/%Y").unwrap())) {
-                Some(amtrak_rt_trip_data) => {
-                    match amtrak_rt_trip_data.data.len() {
-                        0 => vec![],
-                        _ => {
-                            let stops = &amtrak_rt_trip_data.data[0].stops;
-
-                            stops
-                            .iter()
-                            .map(|amtrak_stop_time|
-                                gtfs_rt::trip_update::StopTimeUpdate {
-                                    stop_sequence: None,
-                                    stop_id:Some(amtrak_stop_time.station.code.clone()),
-                                    arrival: amtrak_stop_time.arrival.as_ref().map(|arrival| {
-                                        gtfs_rt::trip_update::StopTimeEvent {
-                                            delay: None,
-                                            time: match &arrival.status_info.date_time {
-                                                Some(x) => Some(DateTime::parse_from_rfc3339(x.as_str()).unwrap().timestamp()),
-                                                None => None
-                                            },
-                                            uncertainty: None,
-                                        }
-                                    }),
-                                   departure: amtrak_stop_time.departure.as_ref().map(|departure| {
-                                    gtfs_rt::trip_update::StopTimeEvent {
-                                            delay: None,
-                                            time: match &departure.status_info.date_time {
-                                                Some(x) => Some(DateTime::parse_from_rfc3339(x.as_str()).unwrap().timestamp()),
-                                                None => None
-                                            },
-                                            uncertainty: None,
-                                        }
-                                    }),
-                                    departure_occupancy_status: None,
-                                   schedule_relationship: None,
-                                     stop_time_properties: None,
-                                }
-                            ).collect::<Vec<_>>()
-                        }
-                    }
-                },
-                None => vec![]
-            }
-        }, None => vec![]
-    };
+    let arrivals: Vec<gtfs_rt::trip_update::StopTimeUpdate> =
+    feature_to_amtrak_arrival_structs(feature)
+        .iter()
+        .map(|feature| gtfs_rt::trip_update::StopTimeUpdate {
+            stop_sequence: None,
+            stop_id: Some(feature.code.clone()),
+            arrival: match &feature.estarr {
+                Some(estarr) => Some(gtfs_rt::trip_update::StopTimeEvent {
+                    delay: None,
+                    time: Some(time_and_tz_to_unix(&estarr, feature.tz)),
+                    uncertainty: None,
+                }),
+                None => None,
+            },
+            departure: match &feature.estdep {
+                Some(estdep) => Some(gtfs_rt::trip_update::StopTimeEvent {
+                    delay: None,
+                    time: Some(time_and_tz_to_unix(&estdep, feature.tz)),
+                    uncertainty: None,
+                }),
+                None => None,
+            },
+            departure_occupancy_status: None,
+            schedule_relationship: None,
+            stop_time_properties: None,
+        })
+        .collect::<Vec<gtfs_rt::trip_update::StopTimeUpdate>>();
 
     let origin_local_time = origin_departure(&origin_time_string, origin_tz);
 
@@ -543,7 +549,7 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
             //query the stop times all simultaniously and put into hashmap
             //query_all_trips_simultaniously
 
-            let stop_times = stop_times::query_all_trips_simultaniously(&list_of_train_ids).await;
+           // let stop_times = stop_times::query_all_trips_simultaniously(&list_of_train_ids).await;
 
             //println!("Successfully decrypted");
             //println!("{}", decrypted_string);
@@ -552,7 +558,7 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
                     entity: features_collection
                         .features
                         .iter()
-                        .map(|feature: &geojson::Feature| feature_to_gtfs_unified(&gtfs, feature, &stop_times))
+                        .map(|feature: &geojson::Feature| feature_to_gtfs_unified(&gtfs, feature))
                         .collect::<Vec<gtfs_rt::FeedEntity>>(),
                     header: make_gtfs_header(),
                 },
