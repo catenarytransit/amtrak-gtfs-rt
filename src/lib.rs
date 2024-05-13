@@ -273,7 +273,7 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature, stop_times: 
 
     let origin_local_time = origin_departure(&origin_time_string, origin_tz);
 
-    let starting_yyyy_mm_dd_in_new_york = origin_local_time.with_timezone(&chrono_tz::America::New_York).format("%Y-%m-%d").to_string();
+    let starting_yyyy_mm_dd_in_new_york = origin_local_time.with_timezone(&chrono_tz::America::New_York).format("%Y%m%d").to_string();
 
     let origin_weekday = origin_local_time.weekday();
 
