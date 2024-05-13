@@ -1,6 +1,6 @@
 [package]
 name = "amtrak-gtfs-rt"
-version = "0.2.4"
+version = "0.2.5"
 license = "AGPL-3.0"
 description = "Converts Amtrak Track-A-Train to valid GTFS-rt vehicle and trip information"
 edition = "2021"
@@ -18,15 +18,15 @@ amtk = "0.1.0"
 amtrak-api = "0.1.0"
 base64 = "0.21"
 chrono = "0.4"
-chrono-tz = "0.8"
+chrono-tz = "0.9"
 futures = "0.3.30"
 geojson = "0.24"
-gtfs-rt = "0.5"
+gtfs-rt = "0.5"                                                                                                                                                                                
 gtfs-structures = "0.41.2"
 openssl = "0.10"
 prost = "0.11"
-reqwest = {version = "0.11", features = ["gzip","brotli","rustls-tls","deflate","cookies","mime_guess"]}
-rust-crypto = "0.2"
+reqwest = {version = "0.12", features = ["gzip","brotli","rustls-tls","deflate","cookies"]}
+rust-crypto  = "0.2"
 serde = "1.0"
 serde_json = "1.0"
 
