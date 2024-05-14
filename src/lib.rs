@@ -117,6 +117,9 @@ pub struct AmtrakArrivalJson {
     estarr: Option<String>,
     //"estdep":"12/11/2023 17:36:00",
     estdep: Option<String>,
+    //same format as estimate but it's actual historical time
+    postarr: Option<String>,
+    postdep: Option<String>,
     //"estarrcmnt":"ON TIME",
     estarrcmnt: Option<String>,
     //"estdepcmnt":"ON TIME"
@@ -255,22 +258,35 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::
         .map(|feature| gtfs_rt::trip_update::StopTimeUpdate {
             stop_sequence: None,
             stop_id: Some(feature.code.clone()),
-            arrival: match &feature.estarr {
-                Some(estarr) => Some(gtfs_rt::trip_update::StopTimeEvent {
+            arrival: match &feature.postarr {
+                Some(postarr) => Some(gtfs_rt::trip_update::StopTimeEvent {
                     delay: None,
-                    time: Some(time_and_tz_to_unix(&estarr, feature.tz)),
+                    time: Some(time_and_tz_to_unix(postarr, feature.tz)),
                     uncertainty: None,
                 }),
-                None => None,
+                None => match &feature.estarr {
+                    Some(estarr) => Some(gtfs_rt::trip_update::StopTimeEvent {
+                        delay: None,
+                        time: Some(time_and_tz_to_unix(&estarr, feature.tz)),
+                        uncertainty: None,
+                    }),
+                    None => None,
+                }
             },
-            departure: match &feature.estdep {
+            departure: match &feature.postdep {
+                Some(postdep) => Some(gtfs_rt::trip_update::StopTimeEvent {
+                    delay: None,
+                    time: Some(time_and_tz_to_unix(postdep, feature.tz)),
+                    uncertainty: None,
+                }),
+                None => match &feature.estdep {
                 Some(estdep) => Some(gtfs_rt::trip_update::StopTimeEvent {
                     delay: None,
                     time: Some(time_and_tz_to_unix(&estdep, feature.tz)),
                     uncertainty: None,
                 }),
                 None => None,
-            },
+            }},
             departure_occupancy_status: None,
             schedule_relationship: None,
             stop_time_properties: None,
