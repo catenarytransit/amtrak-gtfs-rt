@@ -122,7 +122,6 @@ pub struct StatusInfo {
     pub as_of: String,
 }
 
-
 pub async fn query_all_trips_simultaniously(train_numbers: &Vec<(String,NaiveDate)>) -> HashMap<(String, NaiveDate), RootTripData> {
     let client = reqwest::Client::new();
 

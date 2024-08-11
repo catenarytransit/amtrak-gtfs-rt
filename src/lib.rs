@@ -32,7 +32,7 @@
 //! Note that the Metropolitan Transportation Commission also publishes Capital Corridor in their own feed.
 //! https://511.org/open-data/transit provides Capital Corridor as "CC". This data refreshes more often (and is closer in location & time), and shows locomotive numbers.
 //! For this reason, you may wish to remove Capital Corridor from this feed.
-//! Thus, we've included a function `filter_capital_corridor()` which takes in any `gtfs_rt::FeedMessage` and removes CC vehicles and trips.
+//! Thus, we've included a function `filter_capital_corridor()` which takes in any `FeedMessage` and removes CC vehicles and trips.
 
 
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, TimeZone, Weekday};
@@ -42,12 +42,14 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 pub mod stop_times;
 use crate::stop_times::RootTripData;
+use gtfs_realtime::FeedMessage;
+use gtfs_realtime::FeedEntity;
 
 //Written by Kyler Chin - Catenary Transit Initiatives.
-pub fn filter_capital_corridor(input: gtfs_rt::FeedMessage) -> gtfs_rt::FeedMessage {
+pub fn filter_capital_corridor(input: FeedMessage) -> FeedMessage {
     let cc_route_id = "84";
 
-    gtfs_rt::FeedMessage {
+    FeedMessage {
         entity: input
             .entity
             .into_iter()
@@ -79,20 +81,20 @@ pub fn filter_capital_corridor(input: gtfs_rt::FeedMessage) -> gtfs_rt::FeedMess
 
                 true
             })
-            .collect::<Vec<gtfs_rt::FeedEntity>>(),
+            .collect::<Vec<FeedEntity>>(),
         header: input.header,
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResults {
-    pub trip_updates: gtfs_rt::FeedMessage,
-    pub vehicle_positions: gtfs_rt::FeedMessage,
+    pub trip_updates: FeedMessage,
+    pub vehicle_positions: FeedMessage,
 }
 
 #[derive(Clone, Debug)]
 pub struct GtfsAmtrakResultsJoined {
-    pub unified_feed: gtfs_rt::FeedMessage,
+    pub unified_feed: FeedMessage,
 }
 
 #[derive(serde::Deserialize)]
@@ -184,7 +186,7 @@ fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
     }
 }
 
-fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::FeedEntity {
+fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
         geojson::Value::Point(x) => Some(x),
@@ -252,20 +254,20 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::
     }
     .unwrap();
 
-    let arrivals: Vec<gtfs_rt::trip_update::StopTimeUpdate> =
+    let arrivals: Vec<gtfs_realtime::trip_update::StopTimeUpdate> =
     feature_to_amtrak_arrival_structs(feature)
         .iter()
-        .map(|feature| gtfs_rt::trip_update::StopTimeUpdate {
+        .map(|feature| gtfs_realtime::trip_update::StopTimeUpdate {
             stop_sequence: None,
             stop_id: Some(feature.code.clone()),
             arrival: match &feature.postarr {
-                Some(postarr) => Some(gtfs_rt::trip_update::StopTimeEvent {
+                Some(postarr) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
                     time: Some(time_and_tz_to_unix(postarr, feature.tz)),
                     uncertainty: None,
                 }),
                 None => match &feature.estarr {
-                    Some(estarr) => Some(gtfs_rt::trip_update::StopTimeEvent {
+                    Some(estarr) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                         delay: None,
                         time: Some(time_and_tz_to_unix(&estarr, feature.tz)),
                         uncertainty: None,
@@ -274,13 +276,13 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::
                 }
             },
             departure: match &feature.postdep {
-                Some(postdep) => Some(gtfs_rt::trip_update::StopTimeEvent {
+                Some(postdep) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
                     time: Some(time_and_tz_to_unix(postdep, feature.tz)),
                     uncertainty: None,
                 }),
                 None => match &feature.estdep {
-                Some(estdep) => Some(gtfs_rt::trip_update::StopTimeEvent {
+                Some(estdep) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
                     time: Some(time_and_tz_to_unix(&estdep, feature.tz)),
                     uncertainty: None,
@@ -291,7 +293,7 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::
             schedule_relationship: None,
             stop_time_properties: None,
         })
-        .collect::<Vec<gtfs_rt::trip_update::StopTimeUpdate>>();
+        .collect::<Vec<gtfs_realtime::trip_update::StopTimeUpdate>>();
 
     let origin_local_time = origin_departure(&origin_time_string, origin_tz);
 
@@ -369,7 +371,7 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::
 
     let bearing: Option<f32> = get_bearing(feature);
 
-    let trip_desc = gtfs_rt::TripDescriptor {
+    let trip_desc = gtfs_realtime::TripDescriptor {
         trip_id,
         route_id,
         direction_id: None,
@@ -379,14 +381,14 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::
         schedule_relationship: None,
     };
 
-    gtfs_rt::FeedEntity {
+    FeedEntity {
         alert: None,
         id: id.unwrap(),
         is_deleted: Some(false),
         trip_modifications: None,
         stop: None,
         shape: None,
-        trip_update: Some(gtfs_rt::TripUpdate {
+        trip_update: Some(gtfs_realtime::TripUpdate {
             vehicle: None,
             trip: trip_desc.clone(),
             timestamp,
@@ -394,7 +396,7 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::
             stop_time_update: arrivals,
             trip_properties: None,
         }),
-        vehicle: Some(gtfs_rt::VehiclePosition {
+        vehicle: Some(gtfs_realtime::VehiclePosition {
             stop_id: None,
             current_status: None,
             timestamp,
@@ -405,7 +407,7 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::
             current_stop_sequence: None,
             vehicle: None,
             trip: Some(trip_desc.clone()),
-            position: Some(gtfs_rt::Position {
+            position: Some(gtfs_realtime::Position {
                 speed,
                 odometer: None,
                 bearing,
@@ -416,8 +418,8 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> gtfs_rt::
     }
 }
 
-pub fn make_gtfs_header() -> gtfs_rt::FeedHeader {
-    gtfs_rt::FeedHeader {
+pub fn make_gtfs_header() -> gtfs_realtime::FeedHeader {
+    gtfs_realtime::FeedHeader {
         gtfs_realtime_version: String::from("2.0"),
         incrementality: None,
         timestamp: Some(
@@ -483,8 +485,8 @@ pub async fn fetch_amtrak_gtfs_rt(
 ) -> Result<GtfsAmtrakResults, Box<dyn std::error::Error>> {
     let joined_res = fetch_amtrak_gtfs_rt_joined(gtfs, client).await;
 
-    let mut vehicles: Vec<gtfs_rt::FeedEntity> = vec![];
-    let mut trips: Vec<gtfs_rt::FeedEntity> = vec![];
+    let mut vehicles: Vec<FeedEntity> = vec![];
+    let mut trips: Vec<FeedEntity> = vec![];
 
     match joined_res {
         Ok(joined_res) => {
@@ -494,11 +496,11 @@ pub async fn fetch_amtrak_gtfs_rt(
             }
 
             Ok(GtfsAmtrakResults {
-                trip_updates: gtfs_rt::FeedMessage {
+                trip_updates: FeedMessage {
                     entity: trips,
                     header: joined_res.unified_feed.header.clone(),
                 },
-                vehicle_positions: gtfs_rt::FeedMessage {
+                vehicle_positions: FeedMessage {
                     entity: vehicles,
                     header: joined_res.unified_feed.header.clone(),
                 },
@@ -570,12 +572,12 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
             //println!("Successfully decrypted");
             //println!("{}", decrypted_string);
             Ok(GtfsAmtrakResultsJoined {
-                unified_feed: gtfs_rt::FeedMessage {
+                unified_feed: FeedMessage {
                     entity: features_collection
                         .features
                         .iter()
                         .map(|feature: &geojson::Feature| feature_to_gtfs_unified(&gtfs, feature))
-                        .collect::<Vec<gtfs_rt::FeedEntity>>(),
+                        .collect::<Vec<FeedEntity>>(),
                     header: make_gtfs_header(),
                 },
             })
