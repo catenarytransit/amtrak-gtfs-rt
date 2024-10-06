@@ -97,7 +97,7 @@ pub struct GtfsAmtrakResultsJoined {
     pub unified_feed: FeedMessage,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 pub struct AmtrakArrivalJson {
     //{"code":"CTL",
     code: String,
@@ -106,9 +106,9 @@ pub struct AmtrakArrivalJson {
     //"bus":false,
     bus: bool,
     // "scharr":"12/11/2023 17:33:00",
-    scharr: String,
+    scharr: Option<String>,
     // "schdep":"12/11/2023 17:36:00",
-    schdep: String,
+    schdep: Option<String>,
     // "schcmnt":"",
     schcmnt: String,
     //"autoarr":true,
@@ -143,6 +143,8 @@ fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakAr
 
                     if amtrak_arrival.is_ok() {
                         amtrak_arrival_jsons.push(amtrak_arrival.unwrap());
+                    } else {
+                        println!("Error parsing amtrak arrival json, {}\n{}", station_text, amtrak_arrival.unwrap_err());
                     }
                 }
                 _ => {}
@@ -612,7 +614,7 @@ mod tests {
         assert!(amtrak_results.is_ok());
 
         for entity in amtrak_results.unwrap().unified_feed.entity {
-            println!("{:?}", entity.trip_update);
+            //println!("{:?}", entity.trip_update);
         }
 
        // println!("{:?}", amtrak_results.unwrap());
