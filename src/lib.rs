@@ -658,9 +658,21 @@ mod tests {
 
         assert!(amtrak_results.is_ok());
 
-        for entity in amtrak_results.unwrap().unified_feed.entity {
+        for entity in amtrak_results.as_ref().unwrap().unified_feed.entity.iter() {
             //println!("{:?}", entity.trip_update);
         }
+
+        let raw_data = client
+        .get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData")
+        .send()
+        .await.unwrap();
+
+        let decrypted_string = amtk::decrypt(raw_data.text().await.unwrap().as_str()).unwrap();
+
+        let geojson: geojson::GeoJson = decrypted_string.parse::<geojson::GeoJson>().unwrap();
+        let features_collection: FeatureCollection = FeatureCollection::try_from(geojson).unwrap();
+
+        assert_eq!(features_collection.features.len(), amtrak_results.as_ref().unwrap().unified_feed.entity.len());
 
         // println!("{:?}", amtrak_results.unwrap());
     }
