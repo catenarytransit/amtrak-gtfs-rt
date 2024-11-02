@@ -483,12 +483,14 @@ fn tz_char_to_tz(tz: char) -> Option<chrono_tz::Tz> {
         'P' => Some(chrono_tz::America::Los_Angeles),
         'C' => Some(chrono_tz::America::Chicago),
         'A' => Some(chrono_tz::America::Phoenix),
-        _ => None,
+        //NEVER SUPPOSED TO HAPPEN
+        _ => Some(chrono_tz::America::New_York),
     }
 }
 
 //for arrivals and departures, does not parse PM or AM.
 fn time_and_tz_to_unix(timestamp_text: &String, tz: char) -> i64 {
+    println!("{}, {}",timestamp_text, tz);
     // tz: String like "P", "C", "M", or "E"
     //time: "12/11/2023 17:36:00"
     let naive_dt = NaiveDateTime::parse_from_str(timestamp_text, "%m/%d/%Y %H:%M:%S").unwrap();
@@ -496,9 +498,9 @@ fn time_and_tz_to_unix(timestamp_text: &String, tz: char) -> i64 {
     let local_time_representation = tz_char_to_tz(tz)
         .unwrap()
         .from_local_datetime(&naive_dt)
-        .unwrap();
+        .latest();
 
-    local_time_representation.timestamp()
+    local_time_representation.latest()
 }
 
 //for origin departure conversion to local time representation
@@ -508,7 +510,7 @@ pub fn origin_departure(timestamp_text: &str, tz: char) -> chrono::DateTime<chro
     tz_char_to_tz(tz)
         .unwrap()
         .from_local_datetime(&naive_dt)
-        .unwrap()
+        .latest()
 }
 
 //time is formatted 11/18/2023 4:58:09 PM
@@ -517,7 +519,7 @@ pub fn process_timestamp_text(timestamp_text: &str) -> u64 {
 
     let eastern_time = chrono_tz::America::New_York
         .from_local_datetime(&naive_dt)
-        .unwrap();
+        .latest();
 
     eastern_time.timestamp().try_into().unwrap()
 }
