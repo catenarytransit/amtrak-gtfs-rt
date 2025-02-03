@@ -446,16 +446,14 @@ fn feature_to_gtfs_unified(
     };
 
     let alert = match &train_num {
-        Some(train_num) => {
-            match asm_lookup_table {
-                Some(asm_lookup_table) => {
-                    match asm_lookup_table.get(&(origin_local_time.date_naive(), train_num.clone())) {
-                        Some(alerts) => asm_alert_to_gtfs_rt(informed_entity, alerts),
-                        None => None,
-                    }
+        Some(train_num) => match asm_lookup_table {
+            Some(asm_lookup_table) => {
+                match asm_lookup_table.get(&(origin_local_time.date_naive(), train_num.clone())) {
+                    Some(alerts) => asm_alert_to_gtfs_rt(informed_entity, alerts),
+                    None => None,
                 }
-                None => None,
             }
+            None => None,
         },
         None => None,
     };
