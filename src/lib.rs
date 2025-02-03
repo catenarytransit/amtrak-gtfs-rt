@@ -20,7 +20,7 @@
 //!    .unwrap();
 //!
 //!    let client = reqwest::Client::new();
-//!    let amtrak_gtfs_rt = amtrak_gtfs_rt::fetch_amtrak_gtfs_rt(&gtfs, &client).await.unwrap();
+//!    let amtrak_gtfs_rt = amtrak_fetch_amtrak_gtfs_rt(&gtfs, &client).await.unwrap();
 //!
 //!    //extract the binary data
 //!    let vehicle_data = amtrak_gtfs_rt.vehicle_positions.encode_to_vec();
@@ -33,14 +33,15 @@
 //! For this reason, you may wish to remove Capital Corridor from this feed.
 //! Thus, we've included a function `filter_capital_corridor()` which takes in any `FeedMessage` and removes CC vehicles and trips.
 
+use asm::asm_alert_to_gtfs_rt;
 use chrono::{Datelike, NaiveDate, NaiveDateTime, TimeZone, Weekday};
 use geojson::FeatureCollection;
+use gtfs_realtime::FeedEntity;
+use gtfs_realtime::FeedMessage;
 use gtfs_structures::Gtfs;
 use std::collections::HashMap;
 use std::time::SystemTime;
-pub mod stop_times;
-use gtfs_realtime::FeedEntity;
-use gtfs_realtime::FeedMessage;
+pub mod asm;
 
 //Written by Kyler Chin - Catenary Transit Initiatives.
 pub fn filter_capital_corridor(input: FeedMessage) -> FeedMessage {
@@ -87,6 +88,7 @@ pub fn filter_capital_corridor(input: FeedMessage) -> FeedMessage {
 pub struct GtfsAmtrakResults {
     pub trip_updates: FeedMessage,
     pub vehicle_positions: FeedMessage,
+    pub alerts: FeedMessage,
 }
 
 #[derive(Clone, Debug)]
@@ -185,7 +187,11 @@ fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
     }
 }
 
-fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> FeedEntity {
+fn feature_to_gtfs_unified(
+    gtfs: &Gtfs,
+    feature: &geojson::Feature,
+    asm_lookup_table: Option<&HashMap<(NaiveDate, String), Vec<asm::AsmAlert>>>,
+) -> FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
         geojson::Value::Point(x) => Some(x),
@@ -398,12 +404,17 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> FeedEntit
         _ => None,
     };
 
-    let id: Option<String> = match feature.properties.as_ref().unwrap().get("TrainNum") {
+    let train_num: Option<String> = match feature.properties.as_ref().unwrap().get("TrainNum") {
         Some(a) => match a {
             serde_json::value::Value::String(x) => Some(x.clone()),
             _ => None,
         },
         _ => None,
+    };
+
+    let id = match train_num {
+        Some(train_num) => Some(format!("{}-{}", starting_yyyy_mm_dd_in_new_york, train_num)),
+        None => None,
     };
 
     let route_id: Option<String> = match route_name {
@@ -416,8 +427,8 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> FeedEntit
     let bearing: Option<f32> = get_bearing(feature);
 
     let trip_desc = gtfs_realtime::TripDescriptor {
-        trip_id,
-        route_id,
+        trip_id: trip_id.clone(),
+        route_id: route_id.clone(),
         direction_id: None,
         start_time: None,
         start_date: Some(starting_yyyy_mm_dd_in_new_york.clone()),
@@ -425,8 +436,27 @@ fn feature_to_gtfs_unified(gtfs: &Gtfs, feature: &geojson::Feature) -> FeedEntit
         schedule_relationship: None,
     };
 
+    let informed_entity = gtfs_realtime::EntitySelector {
+        agency_id: None,
+        route_id: route_id.clone(),
+        trip: Some(trip_desc.clone()),
+        route_type: None,
+        stop_id: None,
+        direction_id: None,
+    };
+
+    let alert = match asm_lookup_table {
+        Some(asm_lookup_table) => {
+            match asm_lookup_table.get(&(origin_local_time.date(), train_num.clone())) {
+                Some(alerts) => asm_alert_to_gtfs_rt(informed_entity, alerts),
+                None => None,
+            }
+        }
+        None => None,
+    };
+
     FeedEntity {
-        alert: None,
+        alert: alert,
         id: id.unwrap(),
         is_deleted: Some(false),
         trip_modifications: None,
@@ -532,14 +562,19 @@ pub async fn fetch_amtrak_gtfs_rt(
 ) -> Result<GtfsAmtrakResults, Box<dyn std::error::Error>> {
     let joined_res = fetch_amtrak_gtfs_rt_joined(gtfs, client).await;
 
-    let mut vehicles: Vec<FeedEntity> = vec![];
-    let mut trips: Vec<FeedEntity> = vec![];
+    let mut vehicles: Vec<gtfs_realtime::FeedEntity> = vec![];
+    let mut trips: Vec<gtfs_realtime::FeedEntity> = vec![];
+    let mut alerts: Vec<FeedEntity> = vec![];
 
     match joined_res {
         Ok(joined_res) => {
             for feed_entity in joined_res.unified_feed.entity {
                 vehicles.push(feed_entity.clone());
                 trips.push(feed_entity.clone());
+
+                if feed_entity.alert.is_some() {
+                    alerts.push(feed_entity.clone());
+                }
             }
 
             Ok(GtfsAmtrakResults {
@@ -549,6 +584,10 @@ pub async fn fetch_amtrak_gtfs_rt(
                 },
                 vehicle_positions: FeedMessage {
                     entity: vehicles,
+                    header: joined_res.unified_feed.header.clone(),
+                },
+                alerts: FeedMessage {
+                    entity: alerts,
                     header: joined_res.unified_feed.header.clone(),
                 },
             })
@@ -566,6 +605,11 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
         .send()
         .await;
 
+    let raw_asm_data = client
+        .get("https://asm-backend.transitdocs.com/map")
+        .send()
+        .await;
+
     match raw_data {
         Ok(raw_data) => {
             //println!("Raw data successfully downloaded");
@@ -575,56 +619,29 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
             let geojson: geojson::GeoJson = decrypted_string.parse::<geojson::GeoJson>()?;
             let features_collection: FeatureCollection = FeatureCollection::try_from(geojson)?;
 
-            let list_of_train_ids = features_collection
-                .features
-                .iter()
-                .filter_map(|feature| {
-                    let train_num = match feature.properties.as_ref().unwrap().get("TrainNum") {
-                        Some(a) => match a {
-                            serde_json::value::Value::String(x) => Some(x.clone()),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-                    let starting_date = match feature.properties.as_ref().unwrap().get("OrigSchDep")
-                    {
-                        Some(a) => match a {
-                            serde_json::value::Value::String(x) => {
-                                let first_half = NaiveDate::parse_from_str(
-                                    x.split(" ").next().unwrap(),
-                                    "%m/%d/%Y",
-                                );
+            let lookup_table: Option<HashMap<(NaiveDate, String), Vec<asm::AsmAlert>>> =
+                match raw_asm_data {
+                    Ok(raw_asm_data) => {
+                        let asm_root = raw_asm_data.text().await?;
 
-                                match first_half {
-                                    Ok(first_half) => Some(first_half),
-                                    Err(_) => None,
-                                }
-                            }
-                            _ => None,
-                        },
-                        _ => None,
-                    };
+                        let asm_root_json = serde_json::from_str::<asm::AsmRoot>(&asm_root);
 
-                    match (train_num, starting_date) {
-                        (Some(train_num), Some(starting_date)) => Some((train_num, starting_date)),
-                        _ => None,
+                        match asm_root_json {
+                            Ok(asm_root) => Some(asm::make_lookup_table_from_asm_root(asm_root)),
+                            Err(_) => None,
+                        }
                     }
-                })
-                .collect::<Vec<(String, NaiveDate)>>();
+                    Err(_) => None,
+                };
 
-            //query the stop times all simultaniously and put into hashmap
-            //query_all_trips_simultaniously
-
-            // let stop_times = stop_times::query_all_trips_simultaniously(&list_of_train_ids).await;
-
-            //println!("Successfully decrypted");
-            //println!("{}", decrypted_string);
             Ok(GtfsAmtrakResultsJoined {
                 unified_feed: FeedMessage {
                     entity: features_collection
                         .features
                         .iter()
-                        .map(|feature: &geojson::Feature| feature_to_gtfs_unified(gtfs, feature))
+                        .map(|feature: &geojson::Feature| {
+                            feature_to_gtfs_unified(&gtfs, feature, lookup_table.as_ref())
+                        })
                         .collect::<Vec<FeedEntity>>(),
                     header: make_gtfs_header(),
                 },
