@@ -85,15 +85,18 @@ pub fn make_lookup_table_from_asm_root(
         let date = chrono::NaiveDate::parse_from_str(&train.origin_date, "%Y-%m-%d");
 
         if let Ok(date) = date {
-            let train_id = train.train_id;
+            let train_num = train.number.to_string();
             for alert in train.alerts {
                 lookup_table
-                    .entry((date, train_id.clone()))
+                    .entry((date, train_num.clone()))
                     .or_insert(Vec::new())
                     .push(alert);
             }
         }
     }
+
+  //  println!("LOOKUP TABLE: {:#?}", lookup_table);
+
     lookup_table
 }
 

@@ -20,7 +20,7 @@
 //!    .unwrap();
 //!
 //!    let client = reqwest::Client::new();
-//!    let amtrak_gtfs_rt = amtrak_fetch_amtrak_gtfs_rt(&gtfs, &client).await.unwrap();
+//!    let amtrak_gtfs_rt = fetch_amtrak_gtfs_rt(&gtfs, &client).await.unwrap();
 //!
 //!    //extract the binary data
 //!    let vehicle_data = amtrak_gtfs_rt.vehicle_positions.encode_to_vec();
