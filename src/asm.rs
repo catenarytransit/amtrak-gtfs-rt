@@ -33,7 +33,7 @@ pub struct AsmTrain {
     pub location: Location,
     pub stops: Vec<Stop>,
     #[serde(default)]
-    pub alerts: Vec<Alert>,
+    pub alerts: Vec<AsmAlert>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
