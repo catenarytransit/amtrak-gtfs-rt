@@ -351,51 +351,6 @@ fn feature_to_gtfs_unified(
 
     let origin_weekday = origin_local_time.weekday();
 
-    let trip_id: Option<String> = match trip_name {
-        Some(x) => {
-            let hashmap_results = trip_name_to_id_hashmap.get(&x);
-
-            match hashmap_results {
-                Some(hashmap_results) => {
-                    match hashmap_results.len() {
-                        1 => Some(hashmap_results[0].clone()),
-                        _ => {
-                            let possible_results = hashmap_results
-                                .iter()
-                                .filter(|trip_id_candidate| {
-                                    let trip = gtfs.trips.get(trip_id_candidate.as_str()).unwrap();
-
-                                    let calendar = gtfs.calendar.get(&trip.service_id).unwrap();
-
-                                    match origin_weekday {
-                                        Weekday::Mon => calendar.monday,
-                                        Weekday::Tue => calendar.tuesday,
-                                        Weekday::Wed => calendar.wednesday,
-                                        Weekday::Thu => calendar.thursday,
-                                        Weekday::Fri => calendar.friday,
-                                        Weekday::Sat => calendar.saturday,
-                                        Weekday::Sun => calendar.sunday,
-                                    }
-                                    //Seven days a week
-                                    //Every hour, every minute, every second
-                                    //You know night after night
-                                    //I'll be lovin' you right, seven days a week
-                                })
-                                .collect::<Vec<&String>>();
-
-                            match possible_results.len() {
-                                0 => None,
-                                _ => Some(possible_results[0].clone()),
-                            }
-                        }
-                    }
-                }
-                None => None,
-            }
-        }
-        None => None,
-    };
-
     let route_name: Option<String> = match feature.properties.as_ref().unwrap().get("RouteName") {
         Some(a) => match a {
             serde_json::value::Value::String(x) => Some(x.clone()),
@@ -412,15 +367,67 @@ fn feature_to_gtfs_unified(
         _ => None,
     };
 
+    let trip_id: Option<String> = match route_name.as_deref() {
+        Some("San Joaquins") => train_num.clone(),
+        _ => match trip_name {
+            Some(x) => {
+                let hashmap_results = trip_name_to_id_hashmap.get(&x);
+
+                match hashmap_results {
+                    Some(hashmap_results) => {
+                        match hashmap_results.len() {
+                            1 => Some(hashmap_results[0].clone()),
+                            _ => {
+                                let possible_results = hashmap_results
+                                    .iter()
+                                    .filter(|trip_id_candidate| {
+                                        let trip =
+                                            gtfs.trips.get(trip_id_candidate.as_str()).unwrap();
+
+                                        let calendar = gtfs.calendar.get(&trip.service_id).unwrap();
+
+                                        match origin_weekday {
+                                            Weekday::Mon => calendar.monday,
+                                            Weekday::Tue => calendar.tuesday,
+                                            Weekday::Wed => calendar.wednesday,
+                                            Weekday::Thu => calendar.thursday,
+                                            Weekday::Fri => calendar.friday,
+                                            Weekday::Sat => calendar.saturday,
+                                            Weekday::Sun => calendar.sunday,
+                                        }
+                                        //Seven days a week
+                                        //Every hour, every minute, every second
+                                        //You know night after night
+                                        //I'll be lovin' you right, seven days a week
+                                    })
+                                    .collect::<Vec<&String>>();
+
+                                match possible_results.len() {
+                                    0 => None,
+                                    _ => Some(possible_results[0].clone()),
+                                }
+                            }
+                        }
+                    }
+                    None => None,
+                }
+            }
+            None => None,
+        },
+    };
+
     let id = match &train_num {
         Some(train_num) => Some(format!("{}-{}", starting_yyyy_mm_dd_in_new_york, train_num)),
         None => None,
     };
 
     let route_id: Option<String> = match route_name {
-        Some(route_name) => long_name_to_route_id_hashmap
-            .get(&route_name.clone())
-            .cloned(),
+        Some(route_name) => match route_name.as_str() {
+            "San Joaquins" => Some("SJ2".to_string()),
+            _ => long_name_to_route_id_hashmap
+                .get(&route_name.clone())
+                .cloned(),
+        },
         None => None,
     };
 

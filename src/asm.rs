@@ -95,7 +95,7 @@ pub fn make_lookup_table_from_asm_root(
         }
     }
 
-  //  println!("LOOKUP TABLE: {:#?}", lookup_table);
+    //  println!("LOOKUP TABLE: {:#?}", lookup_table);
 
     lookup_table
 }

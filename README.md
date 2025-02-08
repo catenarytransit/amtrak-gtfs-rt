@@ -41,3 +41,7 @@ Note that the Metropolitan Transportation Commission also publishes Capital Corr
 https://511.org/open-data/transit provides Capital Corridor as "CC". This data refreshes more often (and is closer in location & time), and shows locomotive numbers.
 For this reason, you may wish to remove Capital Corridor from this feed.
 Thus, we've included a function `filter_capital_corridor()` which takes in any `gtfs_rt::FeedMessage` and removes CC vehicles and trips.
+
+## San Joaquins update 2025 Feb
+
+Amtrak no longer publishes San Joaquins together with all the other GTFS feeds. However, the trip ids are the same as the train number and the route ID is `SJ2`, and thus, this realtime feed is intended to work with both GTFS files.
