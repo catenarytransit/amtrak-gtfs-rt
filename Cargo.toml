@@ -1,9 +1,9 @@
 [package]
 name = "amtrak-gtfs-rt"
-version = "0.5.2"
+version = "0.5.3"
 license = "AGPL-3.0"
 description = "Converts Amtrak Track-A-Train to valid GTFS-rt vehicle and trip information"
-edition = "2021"
+edition = "2024"
 #Removing this repository link is prohibited in any fork.
 repository = "https://github.com/catenarytransit/amtrak-gtfs-rt"
 
