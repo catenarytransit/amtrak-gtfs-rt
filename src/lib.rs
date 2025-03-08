@@ -12,6 +12,7 @@
 //!
 //!use prost::Message;
 //!use gtfs_structures::Gtfs;
+//!use amtrak_gtfs_rt::fetch_amtrak_gtfs_rt;
 
 //!#[tokio::main]
 //!async fn main() {
@@ -271,13 +272,13 @@ fn feature_to_gtfs_unified(
             arrival: match &feature.postarr {
                 Some(postarr) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
-                    time: Some(time_and_tz_to_unix(postarr, feature.tz)),
+                    time: time_and_tz_to_unix(postarr, feature.tz),
                     uncertainty: None,
                 }),
                 None => match &feature.estarr {
                     Some(estarr) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                         delay: None,
-                        time: Some(time_and_tz_to_unix(estarr, feature.tz)),
+                        time: time_and_tz_to_unix(estarr, feature.tz),
                         uncertainty: None,
                     }),
                     //There is no provided arrival time, interpolate it from the previous stop
@@ -298,21 +299,37 @@ fn feature_to_gtfs_unified(
                                             Some(previous_departure_time) => {
                                                 match &previous.schdep {
                                                     Some(previous_schdep) => {
-                                                        let delay = previous_departure_time - time_and_tz_to_unix(previous_schdep, feature.tz);
+                                                        let prev_sch_dep = time_and_tz_to_unix(previous_schdep, feature.tz);
+                                                        let delay = match (previous_departure_time,prev_sch_dep) {
+                                                            (Some(a), Some(b)) => Some(a - b),
+                                                            _ => None
+                                                        };
 
-                                                        match &feature.scharr {
-                                                            Some(scharr) => {
-                                                                let arrival_time = time_and_tz_to_unix(scharr, feature.tz);
+                                                        match delay {
+                                                            Some( delay) => {
+                                                                match &feature.scharr {
+                                                                    Some(scharr) => {
+                                                                        let arrival_time = time_and_tz_to_unix(scharr, feature.tz);
 
-                                                                let arrival_time = arrival_time + delay;
-
-                                                                Some(gtfs_realtime::trip_update::StopTimeEvent {
-                                                                    delay: Some(delay.try_into().unwrap()),
-                                                                    time: Some(arrival_time),
-                                                                    uncertainty: None,
-                                                                })
+                                                                        match arrival_time {
+                                                                            Some(arrival_time) => {
+                                                                                let arrival_time = arrival_time + delay;
+        
+                                                                        Some(gtfs_realtime::trip_update::StopTimeEvent {
+                                                                            delay: Some(delay.try_into().unwrap()),
+                                                                            time: Some(arrival_time),
+                                                                            uncertainty: None,
+                                                                        })
+                                                                            },
+                                                                            None => None
+                                                                        }
+        
+                                                                        
+                                                                    },
+                                                                    None => None,
+                                                                }
                                                             },
-                                                            None => None,
+                                                            None => None
                                                         }
                                                     },
                                                     None => None
@@ -328,12 +345,12 @@ fn feature_to_gtfs_unified(
             departure: match &feature.postdep {
                 Some(postdep) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
-                    time: Some(time_and_tz_to_unix(postdep, feature.tz)),
+                    time: time_and_tz_to_unix(postdep, feature.tz),
                     uncertainty: None,
                 }),
                 None => feature.estdep.as_ref().map(|estdep| gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
-                    time: Some(time_and_tz_to_unix(estdep, feature.tz)),
+                    time: time_and_tz_to_unix(estdep, feature.tz),
                     uncertainty: None,
                 })},
             departure_occupancy_status: None,
@@ -528,8 +545,8 @@ fn tz_char_to_tz(tz: char) -> Option<chrono_tz::Tz> {
 }
 
 //for arrivals and departures, does not parse PM or AM.
-fn time_and_tz_to_unix(timestamp_text: &String, tz: char) -> i64 {
-    //println!("{}, {}",timestamp_text, tz);
+fn time_and_tz_to_unix(timestamp_text: &String, tz: char) -> Option<i64> {
+    //  println!("{}, {}", timestamp_text, tz);
     // tz: String like "P", "C", "M", or "E"
     //time: "12/11/2023 17:36:00"
     let naive_dt = NaiveDateTime::parse_from_str(timestamp_text, "%m/%d/%Y %H:%M:%S").unwrap();
@@ -537,10 +554,14 @@ fn time_and_tz_to_unix(timestamp_text: &String, tz: char) -> i64 {
     let local_time_representation = tz_char_to_tz(tz)
         .unwrap()
         .from_local_datetime(&naive_dt)
-        .latest()
-        .unwrap();
+        .latest();
 
-    local_time_representation.timestamp().try_into().unwrap()
+    match local_time_representation {
+        None => None,
+        Some(local_time_representation) => {
+            local_time_representation.timestamp().try_into().unwrap()
+        }
+    }
 }
 
 //for origin departure conversion to local time representation
