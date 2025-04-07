@@ -226,9 +226,8 @@ fn feature_to_gtfs_unified(
     //unix time seconds
     let timestamp: Option<u64> = match feature.properties.as_ref().unwrap().get("updated_at") {
         Some(timestamp_text) => match timestamp_text {
-            serde_json::value::Value::String(timestamp_text) => {
-                Some(process_timestamp_text(timestamp_text))
-            }
+            serde_json::value::Value::String(timestamp_text) => 
+                process_timestamp_text(timestamp_text).map(|x| x as u64),
             _ => None,
         },
         _ => None,
@@ -576,8 +575,15 @@ pub fn origin_departure(timestamp_text: &str, tz: char) -> chrono::DateTime<chro
 }
 
 //time is formatted 11/18/2023 4:58:09 PM
-pub fn process_timestamp_text(timestamp_text: &str) -> u64 {
-    let naive_dt = NaiveDateTime::parse_from_str(timestamp_text, "%m/%d/%Y %l:%M:%S %p").unwrap();
+pub fn process_timestamp_text(timestamp_text: &str) -> Option<i64> {
+    let naive_dt = NaiveDateTime::parse_from_str(timestamp_text, "%m/%d/%Y %l:%M:%S %p");
+
+    if naive_dt.is_err() {
+        println!("Error parsing timestamp: {}", timestamp_text);
+        return None;
+    }
+
+    let naive_dt = naive_dt.unwrap();
 
     let eastern_time = chrono_tz::America::New_York
         .from_local_datetime(&naive_dt)
