@@ -226,8 +226,9 @@ fn feature_to_gtfs_unified(
     //unix time seconds
     let timestamp: Option<u64> = match feature.properties.as_ref().unwrap().get("updated_at") {
         Some(timestamp_text) => match timestamp_text {
-            serde_json::value::Value::String(timestamp_text) => 
-                process_timestamp_text(timestamp_text).map(|x| x as u64),
+            serde_json::value::Value::String(timestamp_text) => {
+                process_timestamp_text(timestamp_text).map(|x| x as u64)
+            }
             _ => None,
         },
         _ => None,
