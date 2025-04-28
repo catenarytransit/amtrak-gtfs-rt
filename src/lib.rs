@@ -596,7 +596,7 @@ pub fn process_timestamp_text(timestamp_text: &str) -> Option<i64> {
 pub async fn fetch_amtrak_gtfs_rt(
     gtfs: &Gtfs,
     client: &reqwest::Client,
-) -> Result<GtfsAmtrakResults, Box<dyn std::error::Error>> {
+) -> Result<GtfsAmtrakResults, Box<dyn std::error::Error + Sync + Send>> {
     let joined_res = fetch_amtrak_gtfs_rt_joined(gtfs, client).await;
 
     let mut vehicles: Vec<gtfs_realtime::FeedEntity> = vec![];
@@ -636,7 +636,7 @@ pub async fn fetch_amtrak_gtfs_rt(
 pub async fn fetch_amtrak_gtfs_rt_joined(
     gtfs: &Gtfs,
     client: &reqwest::Client,
-) -> Result<GtfsAmtrakResultsJoined, Box<dyn std::error::Error>> {
+) -> Result<GtfsAmtrakResultsJoined, Box<dyn std::error::Error + Sync + Send>> {
     let raw_data = client
         .get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData")
         .send()
