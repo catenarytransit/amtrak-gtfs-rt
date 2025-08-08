@@ -110,6 +110,7 @@ pub struct AmtrakArrivalJson {
     // "schdep":"12/11/2023 17:36:00",
     schdep: Option<String>,
     // "schcmnt":"",
+    // "schcmnt":"Canceled"
     schcmnt: String,
     //"autoarr":true,
     autoarr: bool,
@@ -354,7 +355,10 @@ fn feature_to_gtfs_unified(
                     uncertainty: None,
                 })},
             departure_occupancy_status: None,
-            schedule_relationship: None,
+            schedule_relationship: match feature.schcmnt.as_str() {
+                "Canceled" => Some(1),
+                _ => None
+            },
             stop_time_properties: None,
         })
         .collect::<Vec<gtfs_realtime::trip_update::StopTimeUpdate>>();
@@ -363,6 +367,7 @@ fn feature_to_gtfs_unified(
 
     let starting_yyyy_mm_dd_in_new_york = origin_local_time
         .with_timezone(&chrono_tz::America::New_York)
+        .date_naive()
         .format("%Y%m%d")
         .to_string();
 
@@ -748,5 +753,20 @@ mod tests {
         let amtrak_arrival = amtrak_arrival.unwrap();
 
         assert_eq!(amtrak_arrival.code, "LAX");
+    }
+
+    #[test]
+    fn test_origin() {
+        let origin_departure_calc = origin_departure("8/8/2025 9:51:00 AM", 'P');
+
+        println!("{:#?}", origin_departure_calc);
+
+          let starting_yyyy_mm_dd_in_new_york = origin_departure_calc
+        .with_timezone(&chrono_tz::America::New_York)
+        .date_naive()
+        .format("%Y%m%d")
+        .to_string();
+
+      println!("{:#?}", starting_yyyy_mm_dd_in_new_york);
     }
 }
