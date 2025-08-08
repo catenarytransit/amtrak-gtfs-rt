@@ -275,12 +275,14 @@ fn feature_to_gtfs_unified(
                     delay: None,
                     time: time_and_tz_to_unix(postarr, feature.tz),
                     uncertainty: None,
+                    scheduled_time: None,
                 }),
                 None => match &feature.estarr {
                     Some(estarr) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                         delay: None,
                         time: time_and_tz_to_unix(estarr, feature.tz),
                         uncertainty: None,
+                        scheduled_time: None,
                     }),
                     //There is no provided arrival time, interpolate it from the previous stop
                     None => match i {
@@ -320,6 +322,7 @@ fn feature_to_gtfs_unified(
                                                                             delay: Some(delay.try_into().unwrap()),
                                                                             time: Some(arrival_time),
                                                                             uncertainty: None,
+                                                                            scheduled_time: None,
                                                                         })
                                                                             },
                                                                             None => None
@@ -348,11 +351,13 @@ fn feature_to_gtfs_unified(
                     delay: None,
                     time: time_and_tz_to_unix(postdep, feature.tz),
                     uncertainty: None,
+                    scheduled_time: None,
                 }),
                 None => feature.estdep.as_ref().map(|estdep| gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
                     time: time_and_tz_to_unix(estdep, feature.tz),
                     uncertainty: None,
+                    scheduled_time: None,
                 })},
             departure_occupancy_status: None,
             schedule_relationship: match feature.schcmnt.as_str() {
@@ -534,6 +539,7 @@ pub fn make_gtfs_header() -> gtfs_realtime::FeedHeader {
                 .unwrap()
                 .as_secs(),
         ),
+        feed_version: None,
     }
 }
 
@@ -763,12 +769,12 @@ mod tests {
 
         println!("{:#?}", origin_departure_calc);
 
-          let starting_yyyy_mm_dd_in_new_york = origin_departure_calc
-        .with_timezone(&chrono_tz::America::New_York)
-        .date_naive()
-        .format("%Y%m%d")
-        .to_string();
+        let starting_yyyy_mm_dd_in_new_york = origin_departure_calc
+            .with_timezone(&chrono_tz::America::New_York)
+            .date_naive()
+            .format("%Y%m%d")
+            .to_string();
 
-      println!("{:#?}", starting_yyyy_mm_dd_in_new_york);
+        println!("{:#?}", starting_yyyy_mm_dd_in_new_york);
     }
 }
