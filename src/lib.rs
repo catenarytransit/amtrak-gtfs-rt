@@ -370,11 +370,12 @@ fn feature_to_gtfs_unified(
 
     let origin_local_time = origin_departure(&origin_time_string, origin_tz);
 
-    let starting_yyyy_mm_dd_in_new_york = origin_local_time
+    let starting_service_date_new_york = origin_local_time
         .with_timezone(&chrono_tz::America::New_York)
-        .date_naive()
-        .format("%Y%m%d")
-        .to_string();
+        .date_naive();
+
+    let starting_yyyy_mm_dd_in_new_york =
+        starting_service_date_new_york.format("%Y%m%d").to_string();
 
     let origin_weekday = origin_local_time.weekday();
 
@@ -431,7 +432,33 @@ fn feature_to_gtfs_unified(
 
                                 match possible_results.len() {
                                     0 => None,
-                                    _ => Some(possible_results[0].clone()),
+                                    1 => Some(possible_results[0].clone()),
+                                    _ => {
+                                        //further filtering using calendar dates
+
+                                        let further_possible_filtering = possible_results
+                                            .iter()
+                                            .filter(|trip_id_candidate| {
+                                                let trip = gtfs
+                                                    .trips
+                                                    .get(trip_id_candidate.as_str())
+                                                    .unwrap();
+
+                                                let calendar =
+                                                    gtfs.calendar.get(&trip.service_id).unwrap();
+
+                                                starting_service_date_new_york
+                                                    >= calendar.start_date
+                                                    && starting_service_date_new_york
+                                                        <= calendar.end_date
+                                            })
+                                            .collect::<Vec<&&String>>();
+
+                                        match further_possible_filtering.len() {
+                                            0 => Some(possible_results[0].clone()),
+                                            _ => Some(further_possible_filtering[0].to_string()),
+                                        }
+                                    }
                                 }
                             }
                         }
