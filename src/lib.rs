@@ -783,6 +783,9 @@ pub async fn fetch_pacific_surfliner_advisories(
         // scraper's ElementRef doesn't have next_sibling_element, so we navigate siblings manually
         let mut current_node = h4.next_sibling();
         
+        let header_text_all = h4.text().collect::<Vec<_>>().join(" ");
+        let is_strict_section = header_text_all.contains("Service Updates") || header_text_all.contains("Station Notices");
+        
         while let Some(node) = current_node {
             if let Some(element) = scraper::ElementRef::wrap(node) {
                 if element.value().name() == "h4" {
@@ -790,8 +793,15 @@ pub async fn fetch_pacific_surfliner_advisories(
                 }
                 
                 // Check if this element initiates an alert (Title)
-                let is_title = element.select(&strong_selector).next().is_some() 
-                    || element.value().classes().any(|c| c == "u-textColor--orange");
+                let is_strong    = element.select(&strong_selector).next().is_some();
+                let is_orange    = element.value().classes().any(|c| c == "u-textColor--orange");
+                
+                // Strict rules: only orange text counts as title in specified sections
+                let is_title = if is_strict_section {
+                    is_orange
+                } else {
+                    is_strong || is_orange
+                };
                 
                 if is_title {
                     let title_text = element.text().collect::<Vec<_>>().join(" ").trim().to_string();
@@ -807,12 +817,22 @@ pub async fn fetch_pacific_surfliner_advisories(
                                 }
                                 
                                 // Check if this is a subheader (Southbound/Northbound)
-                                let is_potential_header = sib.select(&strong_selector).next().is_some() 
-                                   || sib.value().classes().any(|c| c == "u-textColor--orange");
+                                // Use consistent title check logic for current section
+                                let sib_is_strong = sib.select(&strong_selector).next().is_some();
+                                let sib_is_orange = sib.value().classes().any(|c| c == "u-textColor--orange");
+                                let sib_is_title_candidate = if is_strict_section {
+                                    sib_is_orange
+                                } else {
+                                    sib_is_strong || sib_is_orange
+                                };
 
-                                if is_potential_header {
+                                if sib_is_title_candidate {
                                      let header_text = sib.text().collect::<Vec<_>>().join(" ").trim().to_string();
                                      let lower_text = header_text.to_lowercase();
+                                     // always merge Southbound/Northbound, regardless of strictly being a title or not?
+                                     // Actually, if it MATCHES title criteria, we check if it's South/North.
+                                     // If yes, merge. If no, break (new alert).
+                                     
                                      if lower_text.contains("southbound") || lower_text.contains("northbound") {
                                          description.push_str("\n### ");
                                          description.push_str(&header_text);
@@ -840,12 +860,13 @@ pub async fn fetch_pacific_surfliner_advisories(
                         }
                         
                         // Create alert entity
-                        let timestamp = SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs();
+                        use std::hash::{Hash, Hasher};
+                        use std::collections::hash_map::DefaultHasher;
+                        let mut hasher = DefaultHasher::new();
+                        title_text.hash(&mut hasher);
+                        let id_hash = hasher.finish();
 
-                        let id = format!("PAC_SURF_{}_{}", timestamp, title_text.chars().take(10).collect::<String>().replace(" ", "_").replace("/", "")); 
+                        let id = format!("PAC_SURF_{}", id_hash);
 
                         let ent = FeedEntity {
                             id,
