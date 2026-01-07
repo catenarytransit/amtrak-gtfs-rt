@@ -40,6 +40,7 @@ use geojson::FeatureCollection;
 use gtfs_realtime::FeedEntity;
 use gtfs_realtime::FeedMessage;
 use gtfs_structures::Gtfs;
+use scraper::{Html, Selector};
 use std::collections::HashMap;
 use std::time::SystemTime;
 pub mod asm;
@@ -653,6 +654,15 @@ pub async fn fetch_amtrak_gtfs_rt(
                 }
             }
 
+            match fetch_pacific_surfliner_advisories(client, gtfs).await {
+                Ok(mut surfliner_alerts) => {
+                   alerts.append(&mut surfliner_alerts);
+                },
+                Err(e) => {
+                    eprintln!("Error fetching Pacific Surfliner alerts: {}", e);
+                }
+            }
+
             Ok(GtfsAmtrakResults {
                 trip_updates: FeedMessage {
                     entity: trips,
@@ -729,6 +739,177 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
     }
 }
 
+pub async fn fetch_pacific_surfliner_advisories(
+    client: &reqwest::Client,
+    gtfs: &Gtfs,
+) -> Result<Vec<FeedEntity>, Box<dyn std::error::Error + Sync + Send>> {
+    let url = "https://www.pacificsurfliner.com/plan-your-trip/alerts/travel-advisories/";
+    let resp = client.get(url).send().await?;
+    let text = resp.text().await?;
+    let document = Html::parse_document(&text);
+
+    let mut alerts = Vec::new();
+    
+    // Find Pacific Surfliner route ID
+    let route_id = gtfs.routes.values()
+        .find(|r| r.long_name.as_deref() == Some("Pacific Surfliner"))
+        .map(|r| r.id.clone());
+
+    if route_id.is_none() {
+        return Ok(vec![]);
+    }
+    let route_id = route_id.unwrap();
+
+    let h4_selector = Selector::parse("h4").unwrap();
+    let strong_selector = Selector::parse("strong").unwrap();
+    // let orange_selector = Selector::parse(".u-textColor--orange").unwrap();
+
+    // Iterate over categories (Track Closures, Service Updates, etc.)
+    // Since the structure is flat headers followed by content, we iterate headers.
+    // However, the inspection showed they are inside a container.
+    // But simplified scraper: find all headers, check if they are relevant, then scan siblings?
+    // The inspection said: "Individual advisories do not have a unique wrapper... sequence of paragraphs... following the category header (h4)"
+    
+    // Let's iterate all elements in the main content area to follow the flow.
+    // ContentArea selector: .ContentWidth.ContentArea
+    // But simpler: just find h4s and look at siblings.
+    
+    // Actually, `scraper` doesn't support easy "next sibling" iteration like JS DOM.
+    // It has `next_sibling_element()`.
+    
+    for h4 in document.select(&h4_selector) {
+        // let category_title = h4.text().collect::<Vec<_>>().join(" ");
+        
+        // scraper's ElementRef doesn't have next_sibling_element, so we navigate siblings manually
+        let mut current_node = h4.next_sibling();
+        
+        while let Some(node) = current_node {
+            if let Some(element) = scraper::ElementRef::wrap(node) {
+                if element.value().name() == "h4" {
+                    break; // Next category
+                }
+                
+                // Check if this element initiates an alert (Title)
+                let is_title = element.select(&strong_selector).next().is_some() 
+                    || element.value().classes().any(|c| c == "u-textColor--orange");
+                
+                if is_title {
+                    let title_text = element.text().collect::<Vec<_>>().join(" ").trim().to_string();
+                    if !title_text.is_empty() {
+                        let mut description = String::new();
+                        
+                        // Consume siblings until next title or header
+                        let mut content_sibling = element.next_sibling();
+                        while let Some(sib_node) = content_sibling {
+                            if let Some(sib) = scraper::ElementRef::wrap(sib_node) {
+                                if sib.value().name() == "h4" {
+                                    break;
+                                }
+                                
+                                // Check if this is a subheader (Southbound/Northbound)
+                                let is_potential_header = sib.select(&strong_selector).next().is_some() 
+                                   || sib.value().classes().any(|c| c == "u-textColor--orange");
+
+                                if is_potential_header {
+                                     let header_text = sib.text().collect::<Vec<_>>().join(" ").trim().to_string();
+                                     let lower_text = header_text.to_lowercase();
+                                     if lower_text.contains("southbound") || lower_text.contains("northbound") {
+                                         description.push_str("\n### ");
+                                         description.push_str(&header_text);
+                                         description.push_str("\n\n");
+                                     } else {
+                                         break; // It's a new alert
+                                     }
+                                } else {
+                                    let text = sib.text().collect::<Vec<_>>().join(" ").trim().to_string();
+                                     if !text.is_empty() {
+                                         if sib.value().name() == "ul" {
+                                             // format list items
+                                             for li in sib.select(&Selector::parse("li").unwrap()) {
+                                                description.push_str(&format!("- {}\n", li.text().collect::<Vec<_>>().join(" ")));
+                                             }
+                                         } else {
+                                            description.push_str(&text);
+                                            description.push_str("\n\n");
+                                         }
+                                     }
+                                }
+                            }
+                             
+                            content_sibling = sib_node.next_sibling();
+                        }
+                        
+                        // Create alert entity
+                        let timestamp = SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
+
+                        let id = format!("PAC_SURF_{}_{}", timestamp, title_text.chars().take(10).collect::<String>().replace(" ", "_").replace("/", "")); 
+
+                        let ent = FeedEntity {
+                            id,
+                            is_deleted: Some(false),
+                            trip_update: None,
+                            vehicle: None,
+                            stop: None,
+                            shape: None,
+                            trip_modifications: None,
+                            alert: Some(gtfs_realtime::Alert {
+                                active_period: vec![],
+                                informed_entity: vec![gtfs_realtime::EntitySelector {
+                                    agency_id: None,
+                                    route_id: Some(route_id.clone()),
+                                    route_type: None,
+                                    trip: None,
+                                    stop_id: None,
+                                    direction_id: None,
+                                }],
+                                cause: Some(1), // Unknown cause
+                                effect: Some(8), // Unknown effect
+                                url: None,
+                                header_text: Some(gtfs_realtime::TranslatedString {
+                                    translation: vec![gtfs_realtime::translated_string::Translation {
+                                        text: title_text,
+                                        language: Some("en".to_string()),
+                                    }],
+                                }),
+                                description_text: Some(gtfs_realtime::TranslatedString {
+                                    translation: vec![gtfs_realtime::translated_string::Translation {
+                                        text: description.trim().to_string(),
+                                        language: Some("en".to_string()),
+                                    }],
+                                }),
+                                tts_header_text: None,
+                                tts_description_text: None,
+                                severity_level: None,
+                                image: None,
+                                image_alternative_text: None,
+                                cause_detail: None,
+                                effect_detail: None,
+                            }),
+                        };
+                        alerts.push(ent);
+                        current_node = content_sibling;
+                        continue;
+                    }
+                }
+            }
+            
+            current_node = node.next_sibling();
+        }
+    }
+    
+    // Also handle "top level" alerts if any? 
+    // The scraper above logic:
+    // 1. Find H4.
+    // 2. Iterate siblings.
+    // 3. If sibling is title, capture it and subsequent text content.
+    // This seems robust enough for the structure described.
+    
+    Ok(alerts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -803,5 +984,53 @@ mod tests {
             .to_string();
 
         println!("{:#?}", starting_yyyy_mm_dd_in_new_york);
+    }
+    #[tokio::test]
+    async fn test_surfliner_advisories() {
+        let client = reqwest::Client::new();
+        // create a dummy GTFS with Pacific Surfliner route
+        
+        let mut routes = std::collections::HashMap::new();
+        routes.insert("PAC_SURF_ID".to_string(), gtfs_structures::Route {
+             id: "PAC_SURF_ID".to_string(),
+             long_name: Some("Pacific Surfliner".to_string()),
+             short_name: None,
+             desc: None,
+             route_type: gtfs_structures::RouteType::Rail,
+             url: None,
+             ..Default::default()
+        });
+        
+        // Construct Gtfs using Default if available, otherwise minimal manual
+        let gtfs = Gtfs {
+            routes,
+            ..Default::default()
+        };
+        
+        // This test hits the network, so it might change over time.
+        // We just check that it runs and doesn't crash.
+        let alerts = fetch_pacific_surfliner_advisories(&client, &gtfs).await;
+        
+        match alerts {
+            Ok(alerts) => {
+                println!("Fetched {} alerts", alerts.len());
+                for alert in alerts {
+                    // Check if translation exists before accessing
+                    if let Some(header) = alert.alert.as_ref().and_then(|a| a.header_text.as_ref()) {
+                        if !header.translation.is_empty() {
+                            println!("Alert: {:?}", header.translation[0].text);
+                        }
+                    }
+                     if let Some(desc) = alert.alert.as_ref().and_then(|a| a.description_text.as_ref()) {
+                        if !desc.translation.is_empty() {
+                            println!("Description: {:?}", desc.translation[0].text);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Error fetching alerts: {}", e);
+            }
+        }
     }
 }
