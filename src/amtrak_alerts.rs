@@ -1,9 +1,34 @@
 use chrono::Datelike;
+use futures::stream::StreamExt;
 use gtfs_realtime::translated_string::Translation;
 use gtfs_realtime::{Alert, EntitySelector, FeedEntity, FeedHeader, FeedMessage};
 use reqwest::Client;
 use serde::Deserialize;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const PROXIES: &[&str] = &[
+    "http://45.59.186.60:80",
+    "http://34.194.110.189:80",
+    "http://104.197.218.238:8080",
+    "http://154.17.228.122:80",
+    "http://152.26.229.52:9443",
+    "http://51.8.61.60:80",
+    "http://54.201.87.119:80",
+    "http://50.203.147.155:80",
+    "http://50.203.147.153:80",
+    "http://50.203.147.157:80",
+    "http://198.111.166.184:80",
+    "http://143.198.135.176:80",
+    "http://209.135.168.41:80",
+    "http://100.48.28.177:80",
+    "http://71.60.160.245:80",
+    "http://174.138.54.65:80",
+    "http://155.94.175.201:8080",
+    "http://47.6.9.54:80",
+    "http://74.50.96.247:8888",
+    "http://108.170.12.14:80",
+];
 
 #[derive(Deserialize, Debug)]
 pub struct AmtrakStationStop {
@@ -44,7 +69,12 @@ pub async fn fetch_train_status(
         train_num, date
     );
 
-    let res = client.get(&url).send().await?;
+    // Timeout is important here so one slow proxy doesn't hang the whole batch forever
+    let res = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await?;
     let text = res.text().await?;
 
     // Attempt to parse. If it fails or data is empty, return None or Error.
@@ -125,15 +155,36 @@ pub fn create_alert_entity(train_num: String, service: AmtrakTrainService) -> Op
     })
 }
 
-pub async fn generate_alerts_feed(gtfs: &gtfs_structures::Gtfs, client: &Client) -> FeedMessage {
-    let mut entities = vec![];
+pub async fn generate_alerts_feed(
+    gtfs: &gtfs_structures::Gtfs,
+    _default_client: &Client,
+) -> FeedMessage {
+    // Create a pool of clients: 1 direct + N proxies
+    let mut clients = Vec::new();
+
+    // Direct client
+    clients.push(Client::builder().build().unwrap_or_default());
+
+    // Proxy clients
+    for proxy_url in PROXIES {
+        if let Ok(proxy) = reqwest::Proxy::all(*proxy_url) {
+            if let Ok(client) = Client::builder().proxy(proxy).build() {
+                clients.push(client);
+            }
+        }
+    }
+
+    // If all proxies fail, we still have the direct client.
+    let clients = Arc::new(clients);
 
     let now_system = SystemTime::now();
+    // We assume the system time is reasonably close to the timezone of the feed for "today".
+    // Or just use Utc date for filtering.
     let now_date = chrono::prelude::Utc::now().naive_utc().date();
 
     // We want to look at trains running today, yesterday (if delayed), and tomorrow (if starting soon).
-    let window_start = now_system - std::time::Duration::from_secs(8 * 3600); // 8 hours ago
-    let window_end = now_system + std::time::Duration::from_secs(4 * 3600); // 4 hours in the future (buffer for upcoming)
+    let _window_start = now_system - std::time::Duration::from_secs(8 * 3600); // 8 hours ago
+    let _window_end = now_system + std::time::Duration::from_secs(4 * 3600); // 4 hours in the future (buffer for upcoming)
 
     let mut train_queries: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
@@ -186,24 +237,7 @@ pub async fn generate_alerts_feed(gtfs: &gtfs_structures::Gtfs, client: &Client)
             if service_active {
                 // Determine trip start and end relative to THIS date
                 // Gtfs times are seconds from midnight of the service day.
-                // We'll approximate using the date at midnight UTC (simplification, ideally use feed timezone).
-                // Assuming Amtrak feed is mostly America/New_York or similar, but dates are dates.
 
-                // Find first and last stop time
-                // This might be slow if stop_times are lazy, but usually they are populated.
-
-                // Optimization: Just check if we have stop times.
-                // Actually, accessing stop_times for every trip could be heavy.
-                // But typically necessary.
-
-                // Let's get the max and min times from the trip's stop times if available
-                // If not, we skip.
-
-                // Actually Gtfs struct usually has stop_times attached to trip or via separate map.
-                // gtfs-structures puts them in trip.stop_times if parsed that way.
-                // Let's assume they are there.
-
-                // gtfs-structures Trip struct has stop_times field.
                 let stop_times = &trip.stop_times;
                 if !stop_times.is_empty() {
                     // We need to hint the type here or allow inference to work by not wrapping in wrapper tuple immediately if complex
@@ -214,31 +248,12 @@ pub async fn generate_alerts_feed(gtfs: &gtfs_structures::Gtfs, client: &Client)
                                 .arrival_time
                                 .unwrap_or(last.departure_time.unwrap_or(0));
 
-                            // Construct rough timestamps
-                            // We can't easily get precise SystemTime without timezone.
-                            // But we can check roughly against "seconds from now vs seconds from midnight".
-
                             // Let's stick to the "8 hour buffer" logic using chrono dates.
                             let date_midnight = date_check.and_hms_opt(0, 0, 0).unwrap();
                             let trip_start =
                                 date_midnight + chrono::Duration::seconds(start_secs as i64);
                             let trip_end =
                                 date_midnight + chrono::Duration::seconds(end_secs as i64);
-
-                            // We used UTC date. Amtrak is US. Let's assume UTC for date math relative to now is "close enough"
-                            // or we should be more generous with buffer.
-                            // Better: use the current time in a fixed timezone like America/New_York?
-                            // Since we don't know the user's detailed intent for Timezone,
-                            // and we are just filtering candidates, being generous is better.
-
-                            // Window check:
-                            // Does the trip interval [Start, End] overlap with [Now - 8h, Now + 8h]?
-                            // Actually user said "buffer to previous (8h) and future".
-                            // Meaning:
-                            // If trip ended 7 hours ago, it might still be running (delayed). Include.
-                            // If trip ends 9 hours ago, exclude.
-                            // If trip starts 2 hours from now, include.
-                            // If trip starts 20 hours from now, exclude.
 
                             let now_chrono = chrono::Utc::now().naive_utc();
 
@@ -265,13 +280,32 @@ pub async fn generate_alerts_feed(gtfs: &gtfs_structures::Gtfs, client: &Client)
         }
     }
 
-    for (train_num, date) in train_queries {
-        if let Ok(Some(service)) = fetch_train_status(client, &train_num, &date).await {
-            if let Some(entity) = create_alert_entity(train_num.clone(), service) {
-                entities.push(entity);
+    println!("Queries to make: {}", train_queries.len());
+    println!("Using client pool size: {}", clients.len());
+
+    // Convert Set to Vec for iteration
+    let queries_vec: Vec<_> = train_queries.into_iter().collect();
+
+    let entities = futures::stream::iter(queries_vec.into_iter().enumerate())
+        .map(|(idx, (train_num, date))| {
+            let clients = clients.clone();
+            async move {
+                // Round robin selection
+                let client = &clients[idx % clients.len()];
+                match fetch_train_status(client, &train_num, &date).await {
+                    Ok(Some(service)) => create_alert_entity(train_num, service),
+                    Ok(None) => None,
+                    Err(_) => {
+                        // Optionally log error
+                        None
+                    }
+                }
             }
-        }
-    }
+        })
+        .buffer_unordered(60) // concurrency limit
+        .filter_map(|x| async move { x })
+        .collect::<Vec<_>>()
+        .await;
 
     FeedMessage {
         header: FeedHeader {
@@ -308,17 +342,17 @@ mod tests {
         let client = reqwest::Client::new();
 
         println!("Generating alerts feed...");
+        let start = std::time::Instant::now();
         let feed = generate_alerts_feed(&gtfs, &client).await;
+        let duration = start.elapsed();
 
-        println!("Generated {} alerts.", feed.entity.len());
+        println!("Generated {} alerts in {:?}.", feed.entity.len(), duration);
 
         for entity in feed.entity.iter().take(5) {
             println!("Alert: {:?}", entity);
         }
 
         // We generally expect at least SOME alerts or at least the code to not panic.
-        // Asserting > 0 might be flaky if Amtrak is having a perfect day (rare).
-        // So we just assert it ran.
-        assert!(feed.header.gtfs_realtime_version == "2.0");
+        assert_eq!(feed.header.gtfs_realtime_version, "2.0");
     }
 }
