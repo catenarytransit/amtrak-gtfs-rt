@@ -273,8 +273,8 @@ pub async fn generate_alerts_feed(
                 match fetch_train_status(client, &train_num, &date).await {
                     Ok(Some(service)) => create_alert_entity(train_num, service),
                     Ok(None) => None,
-                    Err(_) => {
-                        // Optionally log error
+                    Err(e) => {
+                        println!("Error fetching status for {}: {}", train_num, e);
                         None
                     }
                 }
