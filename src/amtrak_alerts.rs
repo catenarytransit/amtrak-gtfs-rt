@@ -7,29 +7,6 @@ use serde::Deserialize;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const PROXIES: &[&str] = &[
-    "http://45.59.186.60:80",
-    "http://34.194.110.189:80",
-    "http://104.197.218.238:8080",
-    "http://154.17.228.122:80",
-    "http://152.26.229.52:9443",
-    "http://51.8.61.60:80",
-    "http://54.201.87.119:80",
-    "http://50.203.147.155:80",
-    "http://50.203.147.153:80",
-    "http://50.203.147.157:80",
-    "http://198.111.166.184:80",
-    "http://143.198.135.176:80",
-    "http://209.135.168.41:80",
-    "http://100.48.28.177:80",
-    "http://71.60.160.245:80",
-    "http://174.138.54.65:80",
-    "http://155.94.175.201:8080",
-    "http://47.6.9.54:80",
-    "http://74.50.96.247:8888",
-    "http://108.170.12.14:80",
-];
-
 #[derive(Deserialize, Debug)]
 pub struct AmtrakStationStop {
     pub stationName: Option<String>,
@@ -158,6 +135,7 @@ pub fn create_alert_entity(train_num: String, service: AmtrakTrainService) -> Op
 pub async fn generate_alerts_feed(
     gtfs: &gtfs_structures::Gtfs,
     _default_client: &Client,
+    proxies: &[&str],
 ) -> FeedMessage {
     // Create a pool of clients: 1 direct + N proxies
     let mut clients = Vec::new();
@@ -166,7 +144,7 @@ pub async fn generate_alerts_feed(
     clients.push(Client::builder().build().unwrap_or_default());
 
     // Proxy clients
-    for proxy_url in PROXIES {
+    for proxy_url in proxies {
         if let Ok(proxy) = reqwest::Proxy::all(*proxy_url) {
             if let Ok(client) = Client::builder().proxy(proxy).build() {
                 clients.push(client);
@@ -302,7 +280,7 @@ pub async fn generate_alerts_feed(
                 }
             }
         })
-        .buffer_unordered(60) // concurrency limit
+        .buffer_unordered(120) // concurrency limit
         .filter_map(|x| async move { x })
         .collect::<Vec<_>>()
         .await;
@@ -343,7 +321,7 @@ mod tests {
 
         println!("Generating alerts feed...");
         let start = std::time::Instant::now();
-        let feed = generate_alerts_feed(&gtfs, &client).await;
+        let feed = generate_alerts_feed(&gtfs, &client, crate::DEFAULT_PROXIES).await;
         let duration = start.elapsed();
 
         println!("Generated {} alerts in {:?}.", feed.entity.len(), duration);

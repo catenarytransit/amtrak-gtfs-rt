@@ -45,6 +45,32 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 pub mod amtrak_alerts;
 
+pub const DEFAULT_PROXIES: &[&str] = &[
+    "http://45.59.186.60:80",
+    "http://34.194.110.189:80",
+    "http://104.197.218.238:8080",
+    "http://154.17.228.122:80",
+    "http://152.26.229.52:9443",
+    "http://51.8.61.60:80",
+    "http://54.201.87.119:80",
+    "http://50.203.147.155:80",
+    "http://50.203.147.153:80",
+    "http://50.203.147.157:80",
+    "http://198.111.166.184:80",
+    "http://143.198.135.176:80",
+    "http://209.135.168.41:80",
+    "http://100.48.28.177:80",
+    "http://71.60.160.245:80",
+    "http://174.138.54.65:80",
+    "http://155.94.175.201:8080",
+    "http://47.6.9.54:80",
+    "http://74.50.96.247:8888",
+    "http://108.170.12.14:80",
+    "http://198.23.236.47:1111",
+    "http://198.23.189.151:8118",
+    "http://162.255.110.107:8080"
+];
+
 
 //Written by Kyler Chin - Catenary Transit Initiatives.
 pub fn filter_capital_corridor(input: FeedMessage) -> FeedMessage {
