@@ -1,4 +1,7 @@
-use gtfs_realtime::{Alert, EntitySelector, FeedEntity, FeedHeader, FeedMessage, Timestamp};
+use chrono::Datelike;
+use chrono::Datelike;
+use gtfs_realtime::translated_string::Translation;
+use gtfs_realtime::{Alert, EntitySelector, FeedEntity, FeedHeader, FeedMessage};
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -97,7 +100,7 @@ pub fn create_alert_entity(train_num: String, service: AmtrakTrainService) -> Op
         url: None,
         header_text: None,
         description_text: Some(gtfs_realtime::TranslatedString {
-            translation: vec![gtfs_realtime::Translation {
+            translation: vec![Translation {
                 text: description_text,
                 language: Some("en".to_string()),
             }],
@@ -201,54 +204,60 @@ pub async fn generate_alerts_feed(gtfs: &gtfs_structures::Gtfs, client: &Client)
                 // gtfs-structures puts them in trip.stop_times if parsed that way.
                 // Let's assume they are there.
 
-                if let Ok(stop_times) = gtfs.get_stop_times(&trip.id) {
-                    if let (Some(first), Some(last)) = (stop_times.first(), stop_times.last()) {
-                        let start_secs = first.departure_time.unwrap_or(0);
-                        let end_secs = last
-                            .arrival_time
-                            .unwrap_or(last.departure_time.unwrap_or(0));
+                // gtfs-structures Trip struct has stop_times field.
+                let stop_times = &trip.stop_times;
+                if !stop_times.is_empty() {
+                    // We need to hint the type here or allow inference to work by not wrapping in wrapper tuple immediately if complex
+                    if let Some(first) = stop_times.first() {
+                        if let Some(last) = stop_times.last() {
+                            let start_secs = first.departure_time.unwrap_or(0);
+                            let end_secs = last
+                                .arrival_time
+                                .unwrap_or(last.departure_time.unwrap_or(0));
 
-                        // Construct rough timestamps
-                        // We can't easily get precise SystemTime without timezone.
-                        // But we can check roughly against "seconds from now vs seconds from midnight".
+                            // Construct rough timestamps
+                            // We can't easily get precise SystemTime without timezone.
+                            // But we can check roughly against "seconds from now vs seconds from midnight".
 
-                        // Let's stick to the "8 hour buffer" logic using chrono dates.
-                        let date_midnight = date_check.and_hms_opt(0, 0, 0).unwrap();
-                        let trip_start =
-                            date_midnight + chrono::Duration::seconds(start_secs as i64);
-                        let trip_end = date_midnight + chrono::Duration::seconds(end_secs as i64);
+                            // Let's stick to the "8 hour buffer" logic using chrono dates.
+                            let date_midnight = date_check.and_hms_opt(0, 0, 0).unwrap();
+                            let trip_start =
+                                date_midnight + chrono::Duration::seconds(start_secs as i64);
+                            let trip_end =
+                                date_midnight + chrono::Duration::seconds(end_secs as i64);
 
-                        // We used UTC date. Amtrak is US. Let's assume UTC for date math relative to now is "close enough"
-                        // or we should be more generous with buffer.
-                        // Better: use the current time in a fixed timezone like America/New_York?
-                        // Since we don't know the user's detailed intent for Timezone,
-                        // and we are just filtering candidates, being generous is better.
+                            // We used UTC date. Amtrak is US. Let's assume UTC for date math relative to now is "close enough"
+                            // or we should be more generous with buffer.
+                            // Better: use the current time in a fixed timezone like America/New_York?
+                            // Since we don't know the user's detailed intent for Timezone,
+                            // and we are just filtering candidates, being generous is better.
 
-                        // Window check:
-                        // Does the trip interval [Start, End] overlap with [Now - 8h, Now + 8h]?
-                        // Actually user said "buffer to previous (8h) and future".
-                        // Meaning:
-                        // If trip ended 7 hours ago, it might still be running (delayed). Include.
-                        // If trip ends 9 hours ago, exclude.
-                        // If trip starts 2 hours from now, include.
-                        // If trip starts 20 hours from now, exclude.
+                            // Window check:
+                            // Does the trip interval [Start, End] overlap with [Now - 8h, Now + 8h]?
+                            // Actually user said "buffer to previous (8h) and future".
+                            // Meaning:
+                            // If trip ended 7 hours ago, it might still be running (delayed). Include.
+                            // If trip ends 9 hours ago, exclude.
+                            // If trip starts 2 hours from now, include.
+                            // If trip starts 20 hours from now, exclude.
 
-                        let now_chrono = chrono::Utc::now().naive_utc();
+                            let now_chrono = chrono::Utc::now().naive_utc();
 
-                        let buffer_past = chrono::Duration::hours(8);
-                        let buffer_future = chrono::Duration::hours(4); // "slightly in future"
+                            let buffer_past = chrono::Duration::hours(8);
+                            let buffer_future = chrono::Duration::hours(4); // "slightly in future"
 
-                        // Valid if:
-                        // Trip End > Now - 8h   AND   Trip Start < Now + 4h
+                            // Valid if:
+                            // Trip End > Now - 8h   AND   Trip Start < Now + 4h
 
-                        if trip_end > (now_chrono - buffer_past)
-                            && trip_start < (now_chrono + buffer_future)
-                        {
-                            if let Some(train_num) = &trip.trip_short_name {
-                                train_queries.insert((
-                                    train_num.clone(),
-                                    date_check.format("%Y-%m-%d").to_string(),
-                                ));
+                            if trip_end > (now_chrono - buffer_past)
+                                && trip_start < (now_chrono + buffer_future)
+                            {
+                                if let Some(train_num) = &trip.trip_short_name {
+                                    train_queries.insert((
+                                        train_num.clone(),
+                                        date_check.format("%Y-%m-%d").to_string(),
+                                    ));
+                                }
                             }
                         }
                     }
