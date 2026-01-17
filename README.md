@@ -45,3 +45,6 @@ Thus, we've included a function `filter_capital_corridor()` which takes in any `
 ## San Joaquins update 2025 Feb
 
 Amtrak no longer publishes San Joaquins together with all the other GTFS feeds. However, the trip ids are the same as the train number and the route ID is `SJ2`, and thus, this realtime feed is intended to work with both GTFS files.
+
+### Test functions for amtrak alerts
+`cargo test --package amtrak-gtfs-rt --lib -- src::amtrak_alerts::tests::test_generate_alerts_feed_real --nocapture`

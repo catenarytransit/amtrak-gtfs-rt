@@ -22,7 +22,7 @@ futures = "0.3.31"
 geojson = "0.24"
 gtfs-realtime = "0.2.0"
 gtfs-structures = "0.46.1"
-openssl = "0.10"
+
 prost = "0.14"
 reqwest = { version = "0.12", features = [
     "gzip",
