@@ -43,7 +43,7 @@ use gtfs_structures::Gtfs;
 use scraper::{Html, Selector};
 use std::collections::HashMap;
 use std::time::SystemTime;
-pub mod amtrak_alerts;
+
 
 pub const DEFAULT_PROXIES: &[&str] = &[
     "http://45.59.186.60:80",
