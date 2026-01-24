@@ -504,7 +504,7 @@ fn feature_to_gtfs_unified(
 
     let route_id: Option<String> = match route_name {
         Some(route_name) => match route_name.as_str() {
-            "Gold Runner" => Some("SJ2".to_string()),
+            "Gold Runner" => Some("13510".to_string()),
             _ => long_name_to_route_id_hashmap
                 .get(&route_name.clone())
                 .cloned(),
