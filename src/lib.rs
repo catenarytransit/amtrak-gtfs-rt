@@ -397,9 +397,16 @@ fn feature_to_gtfs_unified(
 
     let origin_local_time = origin_departure(&origin_time_string, origin_tz);
 
-    let starting_service_date_new_york = origin_local_time
+    let mut starting_service_date_new_york = origin_local_time
         .with_timezone(&chrono_tz::America::New_York)
         .date_naive();
+
+    // Check if the computed date is off by ~24 hours by comparing scheduled vs realtime
+    // for the first stop with both values available
+    let date_offset = detect_date_offset_from_delay(&features_list);
+    if date_offset != 0 {
+        starting_service_date_new_york = starting_service_date_new_york + chrono::Duration::days(date_offset as i64);
+    }
 
     let starting_yyyy_mm_dd_in_new_york =
         starting_service_date_new_york.format("%Y%m%d").to_string();
@@ -504,7 +511,7 @@ fn feature_to_gtfs_unified(
 
     let route_id: Option<String> = match route_name {
         Some(route_name) => match route_name.as_str() {
-            "Gold Runner" => Some("SJ2".to_string()),
+            "Gold Runner" => Some("GR".to_string()),
             _ => long_name_to_route_id_hashmap
                 .get(&route_name.clone())
                 .cloned(),
@@ -616,6 +623,46 @@ fn time_and_tz_to_unix(timestamp_text: &String, tz: char) -> Option<i64> {
             local_time_representation.timestamp().try_into().unwrap()
         }
     }
+}
+
+/// Detects if the starting date is off by approximately 24 hours by analyzing delays.
+/// Looks at the first stop with both scheduled and realtime times available.
+/// Returns: -1 if date should be shifted back 1 day, +1 if forward 1 day, 0 if no adjustment needed.
+fn detect_date_offset_from_delay(features_list: &[AmtrakArrivalJson]) -> i32 {
+    const TWENTY_TWO_HOURS_SECS: i64 = 22 * 3600;
+    const TWENTY_SIX_HOURS_SECS: i64 = 26 * 3600;
+
+    for feature in features_list {
+        // Get scheduled time (prefer arrival, fall back to departure)
+        let scheduled_time = feature.scharr.as_ref()
+            .and_then(|t| time_and_tz_to_unix(t, feature.tz))
+            .or_else(|| feature.schdep.as_ref().and_then(|t| time_and_tz_to_unix(t, feature.tz)));
+
+        // Get realtime/actual time (prefer actual, fall back to estimated)
+        let realtime_time = feature.postarr.as_ref()
+            .and_then(|t| time_and_tz_to_unix(t, feature.tz))
+            .or_else(|| feature.postdep.as_ref().and_then(|t| time_and_tz_to_unix(t, feature.tz)))
+            .or_else(|| feature.estarr.as_ref().and_then(|t| time_and_tz_to_unix(t, feature.tz)))
+            .or_else(|| feature.estdep.as_ref().and_then(|t| time_and_tz_to_unix(t, feature.tz)));
+
+        if let (Some(sched), Some(rt)) = (scheduled_time, realtime_time) {
+            let delay = rt - sched;
+
+            // If delay is close to +24 hours, the start date should be shifted back 1 day
+            if delay > TWENTY_TWO_HOURS_SECS && delay < TWENTY_SIX_HOURS_SECS {
+                return -1;
+            }
+            // If delay is close to -24 hours, the start date should be shifted forward 1 day
+            if delay < -TWENTY_TWO_HOURS_SECS && delay > -TWENTY_SIX_HOURS_SECS {
+                return 1;
+            }
+            // Found a usable pair, delay is reasonable
+            return 0;
+        }
+    }
+
+    // No usable data found
+    0
 }
 
 //for origin departure conversion to local time representation
