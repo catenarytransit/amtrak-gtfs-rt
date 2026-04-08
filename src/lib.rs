@@ -35,6 +35,7 @@
 //! Thus, we've included a function `filter_capital_corridor()` which takes in any `FeedMessage` and removes CC vehicles and trips.
 
 
+use asm::asm_alert_to_gtfs_rt;
 use chrono::{Datelike, NaiveDate, NaiveDateTime, TimeZone, Weekday};
 use geojson::FeatureCollection;
 use gtfs_realtime::FeedEntity;
@@ -43,6 +44,7 @@ use gtfs_structures::Gtfs;
 use scraper::{Html, Selector};
 use std::collections::HashMap;
 use std::time::SystemTime;
+pub mod asm;
 
 
 pub const DEFAULT_PROXIES: &[&str] = &[
@@ -220,6 +222,7 @@ fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
 fn feature_to_gtfs_unified(
     gtfs: &Gtfs,
     feature: &geojson::Feature,
+    asm_lookup_table: Option<&HashMap<(NaiveDate, String), Vec<asm::AsmAlert>>>,
 ) -> FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
@@ -540,10 +543,21 @@ fn feature_to_gtfs_unified(
         direction_id: None,
     };
 
-
+    let alert = match &train_num {
+        Some(train_num) => match asm_lookup_table {
+            Some(asm_lookup_table) => {
+                match asm_lookup_table.get(&(origin_local_time.date_naive(), train_num.clone())) {
+                    Some(alerts) => asm_alert_to_gtfs_rt(informed_entity, alerts),
+                    None => None,
+                }
+            }
+            None => None,
+        },
+        None => None,
+    };
 
     FeedEntity {
-        alert: None,
+        alert,
         id: id.unwrap(),
         is_deleted: Some(false),
         trip_modifications: None,
@@ -753,7 +767,10 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
         .send()
         .await;
 
-
+    let raw_asm_data = client
+        .get("https://asm-backend.transitdocs.com/map")
+        .send()
+        .await;
 
     match raw_data {
         Ok(raw_data) => {
@@ -766,7 +783,28 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
             let geojson: geojson::GeoJson = decrypted_string.parse::<geojson::GeoJson>()?;
             let features_collection: FeatureCollection = FeatureCollection::try_from(geojson)?;
 
+            let lookup_table: Option<HashMap<(NaiveDate, String), Vec<asm::AsmAlert>>> =
+                match raw_asm_data {
+                    Ok(raw_asm_data) => {
+                        let asm_root = raw_asm_data.text().await?;
 
+                        println!("ASM data successfully downloaded");
+
+                        let asm_root_json = serde_json::from_str::<asm::AsmRoot>(&asm_root);
+
+                        match asm_root_json {
+                            Ok(asm_root) => Some(asm::make_lookup_table_from_asm_root(asm_root)),
+                            Err(_) => {
+                                eprintln!("Error parsing ASM data, proceeding without alerts");
+                                None
+                            },
+                        }
+                    }
+                    Err(_) => {
+                        eprintln!("Error fetching ASM data, proceeding without alerts");
+                        None
+                    },
+                };
 
             Ok(GtfsAmtrakResultsJoined {
                 unified_feed: FeedMessage {
@@ -774,7 +812,7 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
                         .features
                         .iter()
                         .map(|feature: &geojson::Feature| {
-                            feature_to_gtfs_unified(&gtfs, feature)
+                            feature_to_gtfs_unified(&gtfs, feature, lookup_table.as_ref())
                         })
                         .collect::<Vec<FeedEntity>>(),
                     header: make_gtfs_header(),
@@ -834,6 +872,40 @@ mod tests {
         );
 
         // println!("{:?}", amtrak_results.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_alerts_feed_real() {
+        let client = reqwest::ClientBuilder::new()
+            .deflate(true)
+            .gzip(true)
+            .brotli(true)
+            .build()
+            .unwrap();
+
+        let gtfs = Gtfs::from_url_async("https://content.amtrak.com/content/gtfs/GTFS.zip")
+            .await
+            .unwrap();
+
+        let amtrak_results = fetch_amtrak_gtfs_rt(&gtfs, &client).await.unwrap();
+
+        println!(
+            "Trip updates: {} vehicles: {} alerts: {}",
+            amtrak_results.trip_updates.entity.len(),
+            amtrak_results.vehicle_positions.entity.len(),
+            amtrak_results.alerts.entity.len()
+        );
+
+        // Ensure alerts feed is at least structurally valid
+        for entity in &amtrak_results.alerts.entity {
+            if let Some(alert) = &entity.alert {
+                if let Some(desc) = &alert.description_text {
+                    if !desc.translation.is_empty() {
+                        println!("Alert description: {:?}", desc.translation[0].text);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
