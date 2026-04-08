@@ -34,7 +34,6 @@
 //! For this reason, you may wish to remove Capital Corridor from this feed.
 //! Thus, we've included a function `filter_capital_corridor()` which takes in any `FeedMessage` and removes CC vehicles and trips.
 
-
 use asm::asm_alert_to_gtfs_rt;
 use chrono::{Datelike, NaiveDate, NaiveDateTime, TimeZone, Weekday};
 use geojson::FeatureCollection;
@@ -45,7 +44,6 @@ use scraper::{Html, Selector};
 use std::collections::HashMap;
 use std::time::SystemTime;
 pub mod asm;
-
 
 pub const DEFAULT_PROXIES: &[&str] = &[
     "http://45.59.186.60:80",
@@ -70,9 +68,8 @@ pub const DEFAULT_PROXIES: &[&str] = &[
     "http://108.170.12.14:80",
     "http://198.23.236.47:1111",
     "http://198.23.189.151:8118",
-    "http://162.255.110.107:8080"
+    "http://162.255.110.107:8080",
 ];
-
 
 //Written by Kyler Chin - Catenary Transit Initiatives.
 pub fn filter_capital_corridor(input: FeedMessage) -> FeedMessage {
@@ -408,7 +405,8 @@ fn feature_to_gtfs_unified(
     // for the first stop with both values available
     let date_offset = detect_date_offset_from_delay(&features_list);
     if date_offset != 0 {
-        starting_service_date_new_york = starting_service_date_new_york + chrono::Duration::days(date_offset as i64);
+        starting_service_date_new_york =
+            starting_service_date_new_york + chrono::Duration::days(date_offset as i64);
     }
 
     let starting_yyyy_mm_dd_in_new_york =
@@ -648,16 +646,40 @@ fn detect_date_offset_from_delay(features_list: &[AmtrakArrivalJson]) -> i32 {
 
     for feature in features_list {
         // Get scheduled time (prefer arrival, fall back to departure)
-        let scheduled_time = feature.scharr.as_ref()
+        let scheduled_time = feature
+            .scharr
+            .as_ref()
             .and_then(|t| time_and_tz_to_unix(t, feature.tz))
-            .or_else(|| feature.schdep.as_ref().and_then(|t| time_and_tz_to_unix(t, feature.tz)));
+            .or_else(|| {
+                feature
+                    .schdep
+                    .as_ref()
+                    .and_then(|t| time_and_tz_to_unix(t, feature.tz))
+            });
 
         // Get realtime/actual time (prefer actual, fall back to estimated)
-        let realtime_time = feature.postarr.as_ref()
+        let realtime_time = feature
+            .postarr
+            .as_ref()
             .and_then(|t| time_and_tz_to_unix(t, feature.tz))
-            .or_else(|| feature.postdep.as_ref().and_then(|t| time_and_tz_to_unix(t, feature.tz)))
-            .or_else(|| feature.estarr.as_ref().and_then(|t| time_and_tz_to_unix(t, feature.tz)))
-            .or_else(|| feature.estdep.as_ref().and_then(|t| time_and_tz_to_unix(t, feature.tz)));
+            .or_else(|| {
+                feature
+                    .postdep
+                    .as_ref()
+                    .and_then(|t| time_and_tz_to_unix(t, feature.tz))
+            })
+            .or_else(|| {
+                feature
+                    .estarr
+                    .as_ref()
+                    .and_then(|t| time_and_tz_to_unix(t, feature.tz))
+            })
+            .or_else(|| {
+                feature
+                    .estdep
+                    .as_ref()
+                    .and_then(|t| time_and_tz_to_unix(t, feature.tz))
+            });
 
         if let (Some(sched), Some(rt)) = (scheduled_time, realtime_time) {
             let delay = rt - sched;
@@ -797,13 +819,13 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
                             Err(_) => {
                                 eprintln!("Error parsing ASM data, proceeding without alerts");
                                 None
-                            },
+                            }
                         }
                     }
                     Err(_) => {
                         eprintln!("Error fetching ASM data, proceeding without alerts");
                         None
-                    },
+                    }
                 };
 
             Ok(GtfsAmtrakResultsJoined {
