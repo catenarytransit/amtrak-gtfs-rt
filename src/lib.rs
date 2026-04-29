@@ -223,7 +223,9 @@ fn feature_to_gtfs_unified(
 ) -> FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
-        geojson::Value::Point(x) => Some(x),
+        geojson::Value::Point {
+            coordinates: coords,
+        } => Some(coords),
         _ => None,
     };
 
