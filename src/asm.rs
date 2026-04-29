@@ -19,7 +19,7 @@ pub struct WelcomeElement {
     destination: String,
     partial_train: bool,
     last_updated: i64,
-    current_timezone: CurrentTimezone,
+    current_timezone: String,
     threshold: i64,
     disruption: bool,
     total_miles: i64,
@@ -32,26 +32,6 @@ pub struct WelcomeElement {
 pub struct Alert {
     record_time: i64,
     text: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub enum CurrentTimezone {
-    #[serde(rename = "America/Chicago")]
-    AmericaChicago,
-    #[serde(rename = "America/Denver")]
-    AmericaDenver,
-    #[serde(rename = "America/Detroit")]
-    AmericaDetroit,
-    #[serde(rename = "America/Edmonton")]
-    AmericaEdmonton,
-    #[serde(rename = "America/Los_Angeles")]
-    AmericaLosAngeles,
-    #[serde(rename = "America/New_York")]
-    AmericaNewYork,
-    #[serde(rename = "America/Phoenix")]
-    AmericaPhoenix,
-    #[serde(rename = "America/Toronto")]
-    AmericaToronto,
 }
 
 #[derive(Serialize, Deserialize)]

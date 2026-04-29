@@ -818,8 +818,8 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
 
                         match asm_root_json {
                             Ok(asm_root) => Some(asm::make_lookup_table_from_asm_root(asm_root)),
-                            Err(_) => {
-                                eprintln!("Error parsing ASM data, proceeding without alerts");
+                            Err(e) => {
+                                eprintln!("Error parsing ASM data, proceeding without alerts, {:?}", e);
                                 None
                             }
                         }
