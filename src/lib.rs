@@ -35,11 +35,15 @@
 //! Thus, we've included a function `filter_capital_corridor()` which takes in any `FeedMessage` and removes CC vehicles and trips.
 
 use asm::asm_alert_to_gtfs_rt;
-use chrono::{Datelike, NaiveDate, NaiveDateTime, TimeZone, Weekday};
+mod timezone;
 use geojson::FeatureCollection;
 use gtfs_realtime::FeedEntity;
 use gtfs_realtime::FeedMessage;
 use gtfs_structures::Gtfs;
+use jiff::{
+    ToSpan, Zoned,
+    civil::{Date, DateTime, Weekday},
+};
 use scraper::{Html, Selector};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -219,7 +223,7 @@ fn get_bearing(feature: &geojson::Feature) -> Option<f32> {
 fn feature_to_gtfs_unified(
     gtfs: &Gtfs,
     feature: &geojson::Feature,
-    asm_lookup_table: Option<&HashMap<(NaiveDate, String), Vec<asm::AsmAlert>>>,
+    asm_lookup_table: Option<&HashMap<(Date, String), Vec<asm::AsmAlert>>>,
 ) -> FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
@@ -346,7 +350,7 @@ fn feature_to_gtfs_unified(
                                                                         match arrival_time {
                                                                             Some(arrival_time) => {
                                                                                 let arrival_time = arrival_time + delay;
-        
+
                                                                         Some(gtfs_realtime::trip_update::StopTimeEvent {
                                                                             delay: Some(delay.try_into().unwrap()),
                                                                             time: Some(arrival_time),
@@ -356,8 +360,8 @@ fn feature_to_gtfs_unified(
                                                                             },
                                                                             None => None
                                                                         }
-        
-                                                                        
+
+
                                                                     },
                                                                     None => None,
                                                                 }
@@ -400,19 +404,20 @@ fn feature_to_gtfs_unified(
     let origin_local_time = origin_departure(&origin_time_string, origin_tz);
 
     let mut starting_service_date_new_york = origin_local_time
-        .with_timezone(&chrono_tz::America::New_York)
-        .date_naive();
+        .with_time_zone(timezone::get("America/New_York"))
+        .date();
 
     // Check if the computed date is off by ~24 hours by comparing scheduled vs realtime
     // for the first stop with both values available
     let date_offset = detect_date_offset_from_delay(&features_list);
     if date_offset != 0 {
         starting_service_date_new_york =
-            starting_service_date_new_york + chrono::Duration::days(date_offset as i64);
+            starting_service_date_new_york + (date_offset as i64).days();
     }
 
-    let starting_yyyy_mm_dd_in_new_york =
-        starting_service_date_new_york.format("%Y%m%d").to_string();
+    let starting_yyyy_mm_dd_in_new_york = starting_service_date_new_york
+        .strftime("%Y%m%d")
+        .to_string();
 
     let origin_weekday = origin_local_time.weekday();
 
@@ -452,13 +457,13 @@ fn feature_to_gtfs_unified(
                                         let calendar = gtfs.calendar.get(&trip.service_id).unwrap();
 
                                         match origin_weekday {
-                                            Weekday::Mon => calendar.monday,
-                                            Weekday::Tue => calendar.tuesday,
-                                            Weekday::Wed => calendar.wednesday,
-                                            Weekday::Thu => calendar.thursday,
-                                            Weekday::Fri => calendar.friday,
-                                            Weekday::Sat => calendar.saturday,
-                                            Weekday::Sun => calendar.sunday,
+                                            Weekday::Monday => calendar.monday,
+                                            Weekday::Tuesday => calendar.tuesday,
+                                            Weekday::Wednesday => calendar.wednesday,
+                                            Weekday::Thursday => calendar.thursday,
+                                            Weekday::Friday => calendar.friday,
+                                            Weekday::Saturday => calendar.saturday,
+                                            Weekday::Sunday => calendar.sunday,
                                         }
                                         //Seven days a week
                                         //Every hour, every minute, every second
@@ -485,9 +490,17 @@ fn feature_to_gtfs_unified(
                                                     gtfs.calendar.get(&trip.service_id).unwrap();
 
                                                 starting_service_date_new_york
-                                                    >= calendar.start_date
+                                                    >= calendar
+                                                        .start_date
+                                                        .to_string()
+                                                        .parse::<Date>()
+                                                        .unwrap()
                                                     && starting_service_date_new_york
-                                                        <= calendar.end_date
+                                                        <= calendar
+                                                            .end_date
+                                                            .to_string()
+                                                            .parse::<Date>()
+                                                            .unwrap()
                                             })
                                             .collect::<Vec<&&String>>();
 
@@ -546,7 +559,7 @@ fn feature_to_gtfs_unified(
     let alert = match &train_num {
         Some(train_num) => match asm_lookup_table {
             Some(asm_lookup_table) => {
-                match asm_lookup_table.get(&(origin_local_time.date_naive(), train_num.clone())) {
+                match asm_lookup_table.get(&(origin_local_time.date(), train_num.clone())) {
                     Some(alerts) => asm_alert_to_gtfs_rt(informed_entity, alerts),
                     None => None,
                 }
@@ -607,36 +620,20 @@ pub fn make_gtfs_header() -> gtfs_realtime::FeedHeader {
     }
 }
 
-fn tz_char_to_tz(tz: char) -> Option<chrono_tz::Tz> {
-    match tz {
-        'E' => Some(chrono_tz::America::New_York),
-        'M' => Some(chrono_tz::America::Denver),
-        'P' => Some(chrono_tz::America::Los_Angeles),
-        'C' => Some(chrono_tz::America::Chicago),
-        'A' => Some(chrono_tz::America::Phoenix),
-        //NEVER SUPPOSED TO HAPPEN
-        _ => Some(chrono_tz::America::New_York),
-    }
+fn tz_char_to_tz(tz: char) -> jiff::tz::TimeZone {
+    timezone::get(match tz {
+        'M' => "America/Denver",
+        'P' => "America/Los_Angeles",
+        'C' => "America/Chicago",
+        'A' => "America/Phoenix",
+        _ => "America/New_York",
+    })
 }
 
-//for arrivals and departures, does not parse PM or AM.
-fn time_and_tz_to_unix(timestamp_text: &String, tz: char) -> Option<i64> {
-    //  println!("{}, {}", timestamp_text, tz);
-    // tz: String like "P", "C", "M", or "E"
-    //time: "12/11/2023 17:36:00"
-    let naive_dt = NaiveDateTime::parse_from_str(timestamp_text, "%m/%d/%Y %H:%M:%S").unwrap();
-
-    let local_time_representation = tz_char_to_tz(tz)
-        .unwrap()
-        .from_local_datetime(&naive_dt)
-        .latest();
-
-    match local_time_representation {
-        None => None,
-        Some(local_time_representation) => {
-            local_time_representation.timestamp().try_into().unwrap()
-        }
-    }
+// Select the later instant during a fold, and reject nonexistent local times.
+fn time_and_tz_to_unix(timestamp_text: &str, tz: char) -> Option<i64> {
+    let dt = DateTime::strptime("%m/%d/%Y %H:%M:%S", timestamp_text).ok()?;
+    timezone::latest_timestamp(&tz_char_to_tz(tz), dt).map(|ts| ts.as_second())
 }
 
 /// Detects if the starting date is off by approximately 24 hours by analyzing delays.
@@ -704,33 +701,18 @@ fn detect_date_offset_from_delay(features_list: &[AmtrakArrivalJson]) -> i32 {
 }
 
 //for origin departure conversion to local time representation
-pub fn origin_departure(timestamp_text: &str, tz: char) -> chrono::DateTime<chrono_tz::Tz> {
-    let naive_dt = NaiveDateTime::parse_from_str(timestamp_text, "%m/%d/%Y %l:%M:%S %p").unwrap();
-
-    tz_char_to_tz(tz)
-        .unwrap()
-        .from_local_datetime(&naive_dt)
-        .latest()
-        .unwrap()
+pub fn origin_departure(timestamp_text: &str, tz: char) -> Zoned {
+    let dt = DateTime::strptime("%m/%d/%Y %l:%M:%S %p", timestamp_text).unwrap();
+    let tz = tz_char_to_tz(tz);
+    timezone::latest_timestamp(&tz, dt)
+        .expect("valid origin departure")
+        .to_zoned(tz)
 }
 
-//time is formatted 11/18/2023 4:58:09 PM
+// Time is formatted 11/18/2023 4:58:09 PM.
 pub fn process_timestamp_text(timestamp_text: &str) -> Option<i64> {
-    let naive_dt = NaiveDateTime::parse_from_str(timestamp_text, "%m/%d/%Y %l:%M:%S %p");
-
-    if naive_dt.is_err() {
-        println!("Error parsing timestamp: {}", timestamp_text);
-        return None;
-    }
-
-    let naive_dt = naive_dt.unwrap();
-
-    let eastern_time = chrono_tz::America::New_York
-        .from_local_datetime(&naive_dt)
-        .latest()
-        .unwrap();
-
-    eastern_time.timestamp().try_into().unwrap()
+    let dt = DateTime::strptime("%m/%d/%Y %l:%M:%S %p", timestamp_text).ok()?;
+    timezone::latest_timestamp(&timezone::get("America/New_York"), dt).map(|ts| ts.as_second())
 }
 
 pub async fn fetch_amtrak_gtfs_rt(
@@ -807,7 +789,7 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
             let geojson: geojson::GeoJson = decrypted_string.parse::<geojson::GeoJson>()?;
             let features_collection: FeatureCollection = FeatureCollection::try_from(geojson)?;
 
-            let lookup_table: Option<HashMap<(NaiveDate, String), Vec<asm::AsmAlert>>> =
+            let lookup_table: Option<HashMap<(Date, String), Vec<asm::AsmAlert>>> =
                 match raw_asm_data {
                     Ok(raw_asm_data) => {
                         let asm_root = raw_asm_data.text().await?;
@@ -819,7 +801,10 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
                         match asm_root_json {
                             Ok(asm_root) => Some(asm::make_lookup_table_from_asm_root(asm_root)),
                             Err(e) => {
-                                eprintln!("Error parsing ASM data, proceeding without alerts, {:?}", e);
+                                eprintln!(
+                                    "Error parsing ASM data, proceeding without alerts, {:?}",
+                                    e
+                                );
                                 None
                             }
                         }
@@ -952,9 +937,9 @@ mod tests {
         println!("{:#?}", origin_departure_calc);
 
         let starting_yyyy_mm_dd_in_new_york = origin_departure_calc
-            .with_timezone(&chrono_tz::America::New_York)
-            .date_naive()
-            .format("%Y%m%d")
+            .with_time_zone(timezone::get("America/New_York"))
+            .date()
+            .strftime("%Y%m%d")
             .to_string();
 
         println!("{:#?}", starting_yyyy_mm_dd_in_new_york);
@@ -1014,5 +999,42 @@ mod tests {
                 println!("Error fetching alerts: {}", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod jiff_regressions {
+    use super::*;
+    #[test]
+    fn feed_times_keep_later_fold_and_reject_gap() {
+        let expected = "2026-11-01T06:30:00Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_second();
+        assert_eq!(
+            process_timestamp_text("11/01/2026 1:30:00 AM"),
+            Some(expected)
+        );
+        assert_eq!(
+            time_and_tz_to_unix("11/01/2026 01:30:00", 'E'),
+            Some(expected)
+        );
+        assert!(process_timestamp_text("03/08/2026 2:30:00 AM").is_none());
+        assert!(time_and_tz_to_unix("03/08/2026 02:30:00", 'E').is_none());
+        assert!(process_timestamp_text("invalid").is_none());
+    }
+    #[test]
+    fn origin_dates_and_arizona_keep_their_timezone_rules() {
+        let origin = origin_departure("8/8/2025 9:51:00 AM", 'P');
+        assert_eq!(
+            origin
+                .with_time_zone(timezone::get("America/New_York"))
+                .strftime("%Y%m%d")
+                .to_string(),
+            "20250808"
+        );
+        let mountain = time_and_tz_to_unix("07/01/2026 12:00:00", 'M').unwrap();
+        let arizona = time_and_tz_to_unix("07/01/2026 12:00:00", 'A').unwrap();
+        assert_eq!(arizona - mountain, 3600);
     }
 }
