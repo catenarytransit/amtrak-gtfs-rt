@@ -1,0 +1,46 @@
+name: Timezone data
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - run: cargo test --all-targets timezone::tests
+      - name: Require latest IANA release
+        run: |
+          curl --fail --silent --show-error --retry 3 https://data.iana.org/time-zones/tzdb/version > /tmp/latest-tzdata
+          diff -w src/tzdata/version /tmp/latest-tzdata
+  update:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Regenerate using matching IANA compiler
+        run: |
+          latest=$(curl --fail --silent --show-error --retry 3 https://data.iana.org/time-zones/tzdb/version)
+          if [ "$latest" != "$(cat src/tzdata/version)" ]; then
+            python3 tools/update-tzdata.py "$latest"
+          fi
+      - run: cargo test --all-targets timezone::tests
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automated/update-tzdata
+          title: Update packaged IANA timezone data
+          commit-message: Update packaged IANA timezone data
+          body: Generated from the latest IANA data and matching compiler. Publish a new crate release and redeploy consumers after merging.
+          add-paths: src/tzdata

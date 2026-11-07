@@ -95,10 +95,10 @@ pub type AsmAlert = Alert;
 
 pub fn make_lookup_table_from_asm_root(
     asm_root: AsmRoot,
-) -> HashMap<(chrono::NaiveDate, String), Vec<AsmAlert>> {
+) -> HashMap<(jiff::civil::Date, String), Vec<AsmAlert>> {
     let mut lookup_table = HashMap::new();
     for train in asm_root {
-        let date = chrono::NaiveDate::parse_from_str(&train.origin_date, "%Y-%m-%d");
+        let date = train.origin_date.parse::<jiff::civil::Date>();
 
         if let Ok(date) = date {
             let train_num = train.number.to_string();

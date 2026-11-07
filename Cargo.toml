@@ -1,6 +1,6 @@
 [package]
 name = "amtrak-gtfs-rt"
-version = "0.9.1"
+version = "0.10.0"
 license = "AGPL-3.0"
 description = "Converts Amtrak Track-A-Train to valid GTFS-rt vehicle and trip information"
 edition = "2024"
@@ -14,10 +14,9 @@ non_ascii_idents = "deny"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+jiff = { version = "0.2.39", default-features = false, features = ["std", "serde"] }
 amtk = "0.1.0"
 base64 = "0.22"
-chrono = "0.4"
-chrono-tz = "0.10"
 futures = "0.3"
 geojson = "1.0"
 gtfs-realtime = "0.2.0"
