@@ -297,6 +297,25 @@ fn match_scheduled_trip(
     }
 }
 
+/// A realtime train may outlive the static GTFS snapshot (for example, a
+/// November 14 train after the published timetable begins November 15).
+/// Assign a stable realtime-only trip ID instead of borrowing a different
+/// day's scheduled trip. ADDED (1) makes that relationship explicit to clients.
+fn resolve_trip_identity(
+    gtfs: &Gtfs,
+    route_id: Option<&str>,
+    train_number: &str,
+    service_date: Date,
+) -> (String, Option<i32>) {
+    if let Some(id) = match_scheduled_trip(gtfs, route_id, train_number, service_date) {
+        return (id, None);
+    }
+    let date = service_date.strftime("%Y%m%d").to_string();
+    let number = train_number.trim();
+    let route = route_id.unwrap_or("unknown");
+    (format!("amtrak-added-{date}-{route}-{number}"), Some(1))
+}
+
 fn feature_to_gtfs_unified(
     gtfs: &Gtfs,
     feature: &geojson::Feature,
@@ -508,39 +527,23 @@ fn feature_to_gtfs_unified(
         None => None,
     };
 
-    // Amtrak's GTFS calendar is Eastern-based. A late departure in Los Angeles
-    // can belong to the next service day even though it is still the previous
-    // calendar day at the origin. Do not use origin_local_time.date() here.
-    let trip_id = trip_name.as_deref().and_then(|number| {
-        match_scheduled_trip(gtfs, route_id.as_deref(), number, starting_service_date_new_york)
-    });
-    if trip_id.is_none() {
-        let route_trips: Vec<_> = gtfs.trips.values()
-            .filter(|trip| route_id.as_deref().is_some_and(|route| trip.route_id == route))
-            .collect();
-        let matching_numbers: Vec<_> = route_trips.iter()
-            .filter(|trip| trip.trip_short_name.as_deref().is_some_and(|short| {
-                short.trim_start_matches('0') == trip_name.as_deref().unwrap_or("")
-            }))
-            .take(8)
-            .map(|trip| {
-                let cal = gtfs.calendar.get(&trip.service_id);
-                format!("{} / {} / {} / calendar={:?} / exceptions={:?}",
-                    trip.id, trip.trip_short_name.as_deref().unwrap_or(""), trip.service_id,
-                    cal.map(|c| format!("{}..{} weekdays={:?}", c.start_date, c.end_date,
-                        [c.monday, c.tuesday, c.wednesday, c.thursday, c.friday, c.saturday, c.sunday])),
-                    gtfs.calendar_dates.get(&trip.service_id).map(|dates| dates.len()))
-            })
-            .collect();
-        let sample: Vec<_> = route_trips.iter().take(5)
-            .map(|trip| format!("{} / {} / {}", trip.id, trip.trip_short_name.as_deref().unwrap_or(""), trip.service_id))
-            .collect();
-        eprintln!(
-            "No matching scheduled GTFS trip for train {:?}, route {:?}, service date {}; total trips={}, route trips={}, same-number samples={:?}, route samples={:?}",
-            trip_name, route_id, starting_service_date_new_york, gtfs.trips.len(),
-            route_trips.len(), matching_numbers, sample
-        );
-    }
+    // Amtrak's GTFS calendar is Eastern-based. A late Los Angeles departure
+    // can belong to the following Eastern service day. Trains whose original
+    // service is no longer in the downloaded GTFS receive realtime-only IDs.
+    let (trip_id, schedule_relationship) = match trip_name.as_deref() {
+        Some(number) => {
+            let (id, relationship) =
+                resolve_trip_identity(gtfs, route_id.as_deref(), number, starting_service_date_new_york);
+            if relationship.is_some() {
+                eprintln!(
+                    "No active scheduled GTFS trip for train {}, route {:?}, service date {}; publishing as ADDED trip {}",
+                    number, route_id, starting_service_date_new_york, id
+                );
+            }
+            (Some(id), relationship)
+        }
+        None => (None, None),
+    };
 
     let id = match &train_num {
         Some(train_num) => Some(format!("{}-{}", starting_yyyy_mm_dd_in_new_york, train_num)),
@@ -556,7 +559,7 @@ fn feature_to_gtfs_unified(
         start_time: None,
         start_date: Some(starting_yyyy_mm_dd_in_new_york.clone()),
         modified_trip: None,
-        schedule_relationship: None,
+        schedule_relationship,
     };
 
     let informed_entity = gtfs_realtime::EntitySelector {
@@ -1016,6 +1019,48 @@ mod tests {
             Some("train-595-sun".to_string()),
             "This is the wrong trip when local Pacific dates are used"
         );
+    }
+
+    #[test]
+    fn outdated_gtfs_snapshot_uses_stable_added_trip_identity() {
+        // The published static timetable begins 2026-11-15, but the train
+        // started 2026-11-14 and is still visible in the realtime feed.
+        let mut gtfs = Gtfs::default();
+        gtfs.trips.insert("scheduled-40".into(), gtfs_structures::Trip {
+            id: "scheduled-40".into(),
+            route_id: "R40".into(),
+            service_id: "new-schedule".into(),
+            trip_short_name: Some("40".into()),
+            ..Default::default()
+        });
+        gtfs.trips.insert("scheduled-40-spring".into(), gtfs_structures::Trip {
+            id: "scheduled-40-spring".into(),
+            route_id: "R40".into(),
+            service_id: "spring".into(),
+            trip_short_name: Some("40".into()),
+            ..Default::default()
+        });
+        let date = jiff::civil::date(2026, 11, 14);
+        let (id, relationship) = resolve_trip_identity(&gtfs, Some("R40"), "40", date);
+        assert_eq!(id, "amtrak-added-20261114-R40-40");
+        assert_eq!(relationship, Some(1));
+    }
+
+    #[test]
+    fn matched_scheduled_trip_keeps_its_real_id() {
+        let mut gtfs = Gtfs::default();
+        gtfs.trips.insert("real-595".into(), gtfs_structures::Trip {
+            id: "real-595".into(),
+            route_id: "R".into(),
+            service_id: "special".into(),
+            trip_short_name: Some("0595".into()),
+            ..Default::default()
+        });
+        let (id, relationship) = resolve_trip_identity(
+            &gtfs, Some("R"), "595", jiff::civil::date(2026, 11, 16)
+        );
+        assert_eq!(id, "real-595");
+        assert_eq!(relationship, None);
     }
 
     #[test]
