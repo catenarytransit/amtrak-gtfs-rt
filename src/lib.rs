@@ -894,6 +894,63 @@ mod tests {
     }
 
     #[test]
+    fn scheduled_trip_matching_assigns_every_known_route_trip() {
+        // Reproduces the bug where a route was populated but the trip was missing.
+        // Amtrak can report "595" while the GTFS short name is zero-padded.
+        let day = jiff::civil::date(2026, 11, 16);
+        let mut gtfs = Gtfs::default();
+        gtfs.trips.insert("scheduled-595".into(), gtfs_structures::Trip {
+            id: "scheduled-595".into(),
+            route_id: "PAC_SURF".into(),
+            service_id: "special".into(),
+            trip_short_name: Some("0595".into()),
+            ..Default::default()
+        });
+        gtfs.trips.insert("other-route".into(), gtfs_structures::Trip {
+            id: "other-route".into(),
+            route_id: "OTHER".into(),
+            service_id: "special".into(),
+            trip_short_name: Some("595".into()),
+            ..Default::default()
+        });
+        gtfs.calendar_dates.insert("special".into(), vec![gtfs_structures::CalendarDate {
+            service_id: "special".into(),
+            date: "2026-11-16".parse().unwrap(),
+            exception_type: gtfs_structures::Exception::Added,
+        }]);
+
+        assert_eq!(
+            match_scheduled_trip(&gtfs, Some("PAC_SURF"), "595", day),
+            Some("scheduled-595".to_string())
+        );
+        assert_eq!(
+            match_scheduled_trip(&gtfs, Some("OTHER"), "0595", day),
+            Some("other-route".to_string())
+        );
+        // A missing schedule is not grounds for inventing a trip_id.
+        assert_eq!(match_scheduled_trip(&gtfs, Some("PAC_SURF"), "999", day), None);
+    }
+
+    #[test]
+    fn removed_service_does_not_get_a_trip_id() {
+        let day = jiff::civil::date(2026, 11, 16);
+        let mut gtfs = Gtfs::default();
+        gtfs.trips.insert("removed".into(), gtfs_structures::Trip {
+            id: "removed".into(),
+            route_id: "R".into(),
+            service_id: "canceled".into(),
+            trip_short_name: Some("123".into()),
+            ..Default::default()
+        });
+        gtfs.calendar_dates.insert("canceled".into(), vec![gtfs_structures::CalendarDate {
+            service_id: "canceled".into(),
+            date: "2026-11-16".parse().unwrap(),
+            exception_type: gtfs_structures::Exception::Deleted,
+        }]);
+        assert!(match_scheduled_trip(&gtfs, Some("R"), "123", day).is_none());
+    }
+
+    #[test]
     fn read_last_stop() {
         let test_str = r#"{"code":"LAX","tz":"P","bus":false,"scharr":"10/11/2024 16:57:00","schcmnt":"","autoarr":false,"autodep":false}"#;
 
