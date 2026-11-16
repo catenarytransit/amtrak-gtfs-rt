@@ -989,7 +989,9 @@ mod tests {
             features_collection.features.len(),
             amtrak_results.as_ref().unwrap().unified_feed.entity.len()
         );
-        // Live integration regression: an assigned route must have a scheduled trip.
+        // Gold Runner (GR) is identified by its train number, so it does not
+        // require a formal match against an Amtrak scheduled GTFS trip.
+        // All other assigned routes must still resolve to a scheduled trip.
         let without_trip: Vec<_> = amtrak_results
             .as_ref()
             .unwrap()
@@ -998,7 +1000,8 @@ mod tests {
             .iter()
             .filter(|entity| {
                 entity.trip_update.as_ref().is_some_and(|update| {
-                    update.trip.route_id.is_some() && update.trip.trip_id.is_none()
+                    update.trip.route_id.as_deref().is_some_and(|route| route != "GR")
+                        && update.trip.trip_id.is_none()
                 })
             })
             .map(|entity| entity.id.as_str())
