@@ -305,33 +305,37 @@ fn match_scheduled_departure(
         let s = s.trim().trim_start_matches('0');
         if s.is_empty() { "0" } else { s }
     }
-    // The agency's schedule can encode the origin departure as 25:00 or
-    // later, or use an ordinary time on the following service date.
-    let mut matches: Vec<(i64, String, Date)> = Vec::new();
-    for trip in gtfs.trips.values() {
+    // Evaluate both the current Eastern service day (00:00-23:59 GTFS)
+    // and earlier service days (24:00+ GTFS). Bound the backward search by
+    // the actual overflow in candidate first-stop departure times, allowing
+    // one extra day for DST transitions. Do not test future service days:
+    // GTFS stop times are nonnegative offsets from service-day midnight.
+    let candidates: Vec<_> = gtfs.trips.values().filter_map(|trip| {
         if !route_id.is_none_or(|route| trip.route_id == route) {
-            continue;
+            return None;
         }
         if !trip.trip_short_name.as_deref().is_some_and(|s| normalized(s) == normalized(train_number))
             && normalized(&trip.id) != normalized(train_number)
         {
-            continue;
+            return None;
         }
-        let Some(origin_stop) = trip.stop_times.first() else { continue };
-        if origin_stop.stop.id != origin_stop_id {
-            continue;
-        }
-        let Some(departure_seconds) = origin_stop.departure_time else { continue };
-        for offset in -4i64..=1 {
-            let service_date = eastern_day + offset.days();
-            if !runs_on_service_day(gtfs, &trip.service_id, service_date) {
-                continue;
-            }
-            let Ok(midnight) = service_date.at(0, 0, 0, 0).to_zoned(eastern.clone()) else { continue };
-            let Some(scheduled_seconds) = midnight.timestamp().as_second()
-                .checked_add(i64::from(departure_seconds)) else { continue };
+        let origin_stop = trip.stop_times.first()?;
+        if origin_stop.stop.id != origin_stop_id { return None; }
+        Some((trip, origin_stop.departure_time?))
+    }).collect();
+    let max_origin_seconds = candidates.iter().map(|(_, seconds)| *seconds).max()?;
+    let days_to_check = i64::from(max_origin_seconds / 86_400) + 1;
+    let mut matches: Vec<(i64, String, Date)> = Vec::new();
+    for offset in 0..=days_to_check {
+        let service_date = eastern_day - offset.days();
+        let Ok(midnight) = service_date.at(0, 0, 0, 0).to_zoned(eastern.clone()) else { continue };
+        let midnight_seconds = midnight.timestamp().as_second();
+        for (trip, departure_seconds) in &candidates {
+            if !runs_on_service_day(gtfs, &trip.service_id, service_date) { continue }
+            let Some(scheduled_seconds) = midnight_seconds
+                .checked_add(i64::from(*departure_seconds)) else { continue };
             let discrepancy = (scheduled_seconds - departure.as_second()).abs();
-            // Allow small timetable rounding discrepancies, not a different departure.
+            // Only minute-scale timetable rounding is tolerated.
             if discrepancy <= 300 {
                 matches.push((discrepancy, trip.id.clone(), service_date));
             }
@@ -1052,6 +1056,75 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn checks_both_current_and_previous_gtfs_service_days() {
+        use std::sync::Arc;
+        let mut gtfs = Gtfs::default();
+        let lax = Arc::new(gtfs_structures::Stop {
+            id: "LAX".into(),
+            ..Default::default()
+        });
+        for (id, service, seconds) in [
+            ("current", "monday", 3600u32),
+            ("overflow", "sunday", 25 * 3600),
+            ("wrong-time", "sunday", 26 * 3600),
+        ] {
+            gtfs.trips.insert(id.into(), gtfs_structures::Trip {
+                id: id.into(),
+                route_id: "SUNSET".into(),
+                service_id: service.into(),
+                trip_short_name: Some("2".into()),
+                stop_times: vec![gtfs_structures::StopTime {
+                    stop: lax.clone(),
+                    departure_time: Some(seconds),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            });
+        }
+        for (service, day) in [
+            ("monday", "2026-11-16"),
+            ("sunday", "2026-11-15"),
+        ] {
+            gtfs.calendar_dates.insert(service.into(), vec![gtfs_structures::CalendarDate {
+                service_id: service.into(),
+                date: day.parse().unwrap(),
+                exception_type: gtfs_structures::Exception::Added,
+            }]);
+        }
+        let origin = origin_departure("11/15/2026 10:00:00 PM", 'P');
+        // Both the same-day 01:00 and previous-day 25:00 represent
+        // this exact instant. It must NOT arbitrarily select a trip.
+        assert_eq!(
+            match_scheduled_departure(&gtfs, Some("SUNSET"), "2", "LAX", origin),
+            None
+        );
+        gtfs.trips.remove("current");
+        assert_eq!(
+            match_scheduled_departure(&gtfs, Some("SUNSET"), "2", "LAX", origin),
+            Some(("overflow".into(), jiff::civil::date(2026, 11, 15)))
+        );
+        gtfs.trips.remove("overflow");
+        gtfs.trips.remove("wrong-time");
+        // Now only the current-day trip exists: verify same-day matching.
+        gtfs.trips.insert("current".into(), gtfs_structures::Trip {
+            id: "current".into(),
+            route_id: "SUNSET".into(),
+            service_id: "monday".into(),
+            trip_short_name: Some("2".into()),
+            stop_times: vec![gtfs_structures::StopTime {
+                stop: lax,
+                departure_time: Some(3600),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        assert_eq!(
+            match_scheduled_departure(&gtfs, Some("SUNSET"), "2", "LAX", origin),
+            Some(("current".into(), jiff::civil::date(2026, 11, 16)))
+        );
+    }
 
     #[test]
     fn sunset_limited_sunday_pacific_departure_uses_gtfs_service_day() {
