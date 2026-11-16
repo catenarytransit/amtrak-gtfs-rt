@@ -274,7 +274,18 @@ fn match_scheduled_trip(
     // when Track-A-Train lags behind the latest GTFS service calendar. This
     // restores the behavior before the strict calendar filtering regression.
     if candidates.len() == 1 {
-        return Some(candidates[0].id.clone());
+        // Explicit calendar removals must never be bypassed, even if only one
+        // route/number candidate exists.
+        let trip = candidates[0];
+        if gtfs.calendar_dates.get(&trip.service_id).is_some_and(|exceptions| {
+            exceptions.iter().any(|exception| {
+                exception.date.to_string() == service_date.to_string()
+                    && exception.exception_type == gtfs_structures::Exception::Deleted
+            })
+        }) {
+            return None;
+        }
+        return Some(trip.id.clone());
     }
 
     // Multiple scheduled variants require an exact Eastern service-date match.
@@ -504,9 +515,23 @@ fn feature_to_gtfs_unified(
         match_scheduled_trip(gtfs, route_id.as_deref(), number, starting_service_date_new_york)
     });
     if trip_id.is_none() {
+        let route_trips: Vec<_> = gtfs.trips.values()
+            .filter(|trip| route_id.as_deref().is_some_and(|route| trip.route_id == route))
+            .collect();
+        let matching_numbers: Vec<_> = route_trips.iter()
+            .filter(|trip| trip.trip_short_name.as_deref().is_some_and(|short| {
+                short.trim_start_matches('0') == trip_name.as_deref().unwrap_or("")
+            }))
+            .take(8)
+            .map(|trip| format!("{} / {} / {}", trip.id, trip.trip_short_name.as_deref().unwrap_or(""), trip.service_id))
+            .collect();
+        let sample: Vec<_> = route_trips.iter().take(5)
+            .map(|trip| format!("{} / {} / {}", trip.id, trip.trip_short_name.as_deref().unwrap_or(""), trip.service_id))
+            .collect();
         eprintln!(
-            "No matching scheduled GTFS trip for train {:?}, route {:?}, service date {}",
-            trip_name, route_id, starting_service_date_new_york
+            "No matching scheduled GTFS trip for train {:?}, route {:?}, service date {}; total trips={}, route trips={}, same-number samples={:?}, route samples={:?}",
+            trip_name, route_id, starting_service_date_new_york, gtfs.trips.len(),
+            route_trips.len(), matching_numbers, sample
         );
     }
 
