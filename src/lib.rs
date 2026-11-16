@@ -418,9 +418,9 @@ fn feature_to_gtfs_unified(
         .strftime("%Y%m%d")
         .to_string();
 
-    let origin_weekday = tz_char_to_tz(origin_tz)
-        .to_datetime(origin_timestamp)
-        .weekday();
+    // ASM alert dates and service weekdays use the train's origin-local date.
+    let origin_local_time = tz_char_to_tz(origin_tz).to_datetime(origin_timestamp);
+    let origin_weekday = origin_local_time.weekday();
 
     let route_name: Option<String> = match feature.properties.as_ref().unwrap().get("RouteName") {
         Some(a) => match a {
