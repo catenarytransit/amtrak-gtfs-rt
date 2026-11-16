@@ -319,11 +319,16 @@ fn match_scheduled_departure(
         {
             return None;
         }
-        let origin_stop = trip.stop_times.first()?;
-        if origin_stop.stop.id != origin_stop_id { return None; }
+        // Some GTFS trips contain a leading non-revenue stop or a stop with
+        // no departure. Match Amtrak's explicit OrigCode, not the first row.
+        let origin_stop = trip.stop_times.iter()
+            .find(|stop_time| stop_time.stop.id == origin_stop_id
+                && stop_time.departure_time.is_some())?;
         Some((trip, origin_stop.departure_time?))
     }).collect();
     let max_origin_seconds = candidates.iter().map(|(_, seconds)| *seconds).max()?;
+    // Test current date and previous dates that can reach the observed
+    // departure. A safety day accommodates the 23/25-hour DST boundary.
     let days_to_check = i64::from(max_origin_seconds / 86_400) + 1;
     let mut matches: Vec<(i64, String, Date)> = Vec::new();
     for offset in 0..=days_to_check {
@@ -342,6 +347,15 @@ fn match_scheduled_departure(
         }
     }
     matches.sort_by_key(|candidate| candidate.0);
+    if matches.is_empty() {
+        // Include enough context to separate absent trips, calendar
+        // mismatches and timestamp mismatches in production diagnostics.
+        eprintln!(
+            "Amtrak schedule match failed: train={}, route={:?}, origin={},              eastern_departure={}, candidates_with_origin={}, checked_days={}",
+            train_number, route_id, origin_stop_id, departure,
+            candidates.len(), days_to_check + 1,
+        );
+    }
     let best = matches.first()?;
     if matches.get(1).is_some_and(|other| other.0 == best.0) {
         // Ambiguous schedules must not generate an arbitrary trip_id.
@@ -1123,6 +1137,38 @@ mod tests {
         assert_eq!(
             match_scheduled_departure(&gtfs, Some("SUNSET"), "2", "LAX", origin),
             Some(("current".into(), jiff::civil::date(2026, 11, 16)))
+        );
+    }
+
+    #[test]
+    fn match_origin_even_when_not_first_stop_time() {
+        use std::sync::Arc;
+        let mut gtfs = Gtfs::default();
+        let stop = |code: &str, seconds| gtfs_structures::StopTime {
+            stop: Arc::new(gtfs_structures::Stop {
+                id: code.into(),
+                ..Default::default()
+            }),
+            departure_time: seconds,
+            ..Default::default()
+        };
+        gtfs.trips.insert("sunset".into(), gtfs_structures::Trip {
+            id: "sunset".into(),
+            route_id: "SUNSET".into(),
+            service_id: "sunday".into(),
+            trip_short_name: Some("2".into()),
+            stop_times: vec![stop("NONREVENUE", None), stop("LAX", Some(25 * 3600))],
+            ..Default::default()
+        });
+        gtfs.calendar_dates.insert("sunday".into(), vec![gtfs_structures::CalendarDate {
+            service_id: "sunday".into(),
+            date: "2026-11-15".parse().unwrap(),
+            exception_type: gtfs_structures::Exception::Added,
+        }]);
+        let origin = origin_departure("11/15/2026 10:00:00 PM", 'P');
+        assert_eq!(
+            match_scheduled_departure(&gtfs, Some("SUNSET"), "2", "LAX", origin),
+            Some(("sunset".into(), jiff::civil::date(2026, 11, 15)))
         );
     }
 
