@@ -612,10 +612,13 @@ fn feature_to_gtfs_unified(
     let trip_id = scheduled_match.map(|(id, _)| id);
     if trip_id.is_none() {
         if let Some(route_id) = &route_id {
+
+            let route_name = gtfs.routes.get(route_id.as_str()).and_then(|route| route.long_name.as_ref());
+
             eprintln!(
                 "Unmatched scheduled train {:?}, route {:?}, Eastern service date {}",
                 trip_name,
-                gtfs.routes.get(route_id.as_str()).unwrap().long_name,
+                route_name,
                 starting_service_date_new_york
             );
 
