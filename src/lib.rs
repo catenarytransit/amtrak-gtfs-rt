@@ -16,7 +16,7 @@
 
 //!#[tokio::main]
 //!async fn main() {
-//!    let gtfs = Gtfs::from_url_async("https://content.amtrak.com/content/gtfs/GTFS.zip")
+//!    let gtfs = Gtfs::from_url_async("https://github.com/catenarytransit/amtrak-schedule-fixer/releases/download/latest/amtrak-gtfs-noshapes-fixed.zip")
 //!    .await
 //!    .unwrap();
 //!
@@ -270,24 +270,6 @@ fn match_scheduled_trip(
                 || normalized(&trip.id) == number)
     }).collect();
 
-    // For a unique route+train number, retain the known static trip ID even
-    // when Track-A-Train lags behind the latest GTFS service calendar. This
-    // restores the behavior before the strict calendar filtering regression.
-    if candidates.len() == 1 {
-        // Explicit calendar removals must never be bypassed, even if only one
-        // route/number candidate exists.
-        let trip = candidates[0];
-        if gtfs.calendar_dates.get(&trip.service_id).is_some_and(|exceptions| {
-            exceptions.iter().any(|exception| {
-                exception.date.to_string() == service_date.to_string()
-                    && exception.exception_type == gtfs_structures::Exception::Deleted
-            })
-        }) {
-            return None;
-        }
-        return Some(trip.id.clone());
-    }
-
     // Multiple scheduled variants require an exact Eastern service-date match.
     candidates.retain(|trip| runs_on(gtfs, &trip.service_id, service_date));
     if candidates.len() == 1 {
@@ -295,25 +277,6 @@ fn match_scheduled_trip(
     } else {
         None
     }
-}
-
-/// A realtime train may outlive the static GTFS snapshot (for example, a
-/// November 14 train after the published timetable begins November 15).
-/// Assign a stable realtime-only trip ID instead of borrowing a different
-/// day's scheduled trip. ADDED (1) makes that relationship explicit to clients.
-fn resolve_trip_identity(
-    gtfs: &Gtfs,
-    route_id: Option<&str>,
-    train_number: &str,
-    service_date: Date,
-) -> (String, Option<i32>) {
-    if let Some(id) = match_scheduled_trip(gtfs, route_id, train_number, service_date) {
-        return (id, None);
-    }
-    let date = service_date.strftime("%Y%m%d").to_string();
-    let number = train_number.trim();
-    let route = route_id.unwrap_or("unknown");
-    (format!("amtrak-added-{date}-{route}-{number}"), Some(1))
 }
 
 fn feature_to_gtfs_unified(
@@ -527,23 +490,17 @@ fn feature_to_gtfs_unified(
         None => None,
     };
 
-    // Amtrak's GTFS calendar is Eastern-based. A late Los Angeles departure
-    // can belong to the following Eastern service day. Trains whose original
-    // service is no longer in the downloaded GTFS receive realtime-only IDs.
-    let (trip_id, schedule_relationship) = match trip_name.as_deref() {
-        Some(number) => {
-            let (id, relationship) =
-                resolve_trip_identity(gtfs, route_id.as_deref(), number, starting_service_date_new_york);
-            if relationship.is_some() {
-                eprintln!(
-                    "No active scheduled GTFS trip for train {}, route {:?}, service date {}; publishing as ADDED trip {}",
-                    number, route_id, starting_service_date_new_york, id
-                );
-            }
-            (Some(id), relationship)
-        }
-        None => (None, None),
-    };
+    // Match the actual GTFS service calendar in Eastern time. Never create
+    // synthetic trip IDs or mark a scheduled Amtrak train as ADDED.
+    let trip_id = trip_name.as_deref().and_then(|number| {
+        match_scheduled_trip(gtfs, route_id.as_deref(), number, starting_service_date_new_york)
+    });
+    if trip_id.is_none() {
+        eprintln!(
+            "Unmatched scheduled train {:?}, route {:?}, Eastern service date {}",
+            trip_name, route_id, starting_service_date_new_york
+        );
+    }
 
     let id = match &train_num {
         Some(train_num) => Some(format!("{}-{}", starting_yyyy_mm_dd_in_new_york, train_num)),
@@ -559,7 +516,7 @@ fn feature_to_gtfs_unified(
         start_time: None,
         start_date: Some(starting_yyyy_mm_dd_in_new_york.clone()),
         modified_trip: None,
-        schedule_relationship,
+        schedule_relationship: None,
     };
 
     let informed_entity = gtfs_realtime::EntitySelector {
@@ -863,7 +820,7 @@ mod tests {
 
         println!("download and process amtrak gtfs file");
 
-        let gtfs = Gtfs::from_url_async("https://content.amtrak.com/content/gtfs/GTFS.zip")
+        let gtfs = Gtfs::from_url_async("https://github.com/catenarytransit/amtrak-schedule-fixer/releases/download/latest/amtrak-gtfs-noshapes-fixed.zip")
             .await
             .unwrap();
 
@@ -910,7 +867,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let gtfs = Gtfs::from_url_async("https://content.amtrak.com/content/gtfs/GTFS.zip")
+        let gtfs = Gtfs::from_url_async("https://github.com/catenarytransit/amtrak-schedule-fixer/releases/download/latest/amtrak-gtfs-noshapes-fixed.zip")
             .await
             .unwrap();
 
@@ -1018,65 +975,6 @@ mod tests {
             match_scheduled_trip(&gtfs, Some("PAC_SURF"), "595", pacific_date),
             Some("train-595-sun".to_string()),
             "This is the wrong trip when local Pacific dates are used"
-        );
-    }
-
-    #[test]
-    fn outdated_gtfs_snapshot_uses_stable_added_trip_identity() {
-        // The published static timetable begins 2026-11-15, but the train
-        // started 2026-11-14 and is still visible in the realtime feed.
-        let mut gtfs = Gtfs::default();
-        gtfs.trips.insert("scheduled-40".into(), gtfs_structures::Trip {
-            id: "scheduled-40".into(),
-            route_id: "R40".into(),
-            service_id: "new-schedule".into(),
-            trip_short_name: Some("40".into()),
-            ..Default::default()
-        });
-        gtfs.trips.insert("scheduled-40-spring".into(), gtfs_structures::Trip {
-            id: "scheduled-40-spring".into(),
-            route_id: "R40".into(),
-            service_id: "spring".into(),
-            trip_short_name: Some("40".into()),
-            ..Default::default()
-        });
-        let date = jiff::civil::date(2026, 11, 14);
-        let (id, relationship) = resolve_trip_identity(&gtfs, Some("R40"), "40", date);
-        assert_eq!(id, "amtrak-added-20261114-R40-40");
-        assert_eq!(relationship, Some(1));
-    }
-
-    #[test]
-    fn matched_scheduled_trip_keeps_its_real_id() {
-        let mut gtfs = Gtfs::default();
-        gtfs.trips.insert("real-595".into(), gtfs_structures::Trip {
-            id: "real-595".into(),
-            route_id: "R".into(),
-            service_id: "special".into(),
-            trip_short_name: Some("0595".into()),
-            ..Default::default()
-        });
-        let (id, relationship) = resolve_trip_identity(
-            &gtfs, Some("R"), "595", jiff::civil::date(2026, 11, 16)
-        );
-        assert_eq!(id, "real-595");
-        assert_eq!(relationship, None);
-    }
-
-    #[test]
-    fn unique_trip_is_retained_when_realtime_calendar_is_stale() {
-        let mut gtfs = Gtfs::default();
-        gtfs.trips.insert("scheduled-40".into(), gtfs_structures::Trip {
-            id: "scheduled-40".into(),
-            route_id: "R40".into(),
-            service_id: "no-longer-active".into(),
-            trip_short_name: Some("40".into()),
-            ..Default::default()
-        });
-        let date = jiff::civil::date(2026, 11, 14);
-        assert_eq!(
-            match_scheduled_trip(&gtfs, Some("R40"), "40", date),
-            Some("scheduled-40".to_string())
         );
     }
 
