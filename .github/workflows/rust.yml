@@ -6,16 +6,21 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  AMTRAK_FIXED_GTFS_URL: https://github.com/catenarytransit/amtrak-schedule-fixer/releases/download/latest/amtrak-gtfs-noshapes-fixed.zip
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Install Dependencies
-      run: sudo apt install protobuf-compiler
+      run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+    - name: Download fixed Amtrak schedule
+      run: |
+        curl -fL --retry 3 --retry-delay 3 "$AMTRAK_FIXED_GTFS_URL" -o /tmp/amtrak-gtfs-noshapes-fixed.zip
+        unzip -t /tmp/amtrak-gtfs-noshapes-fixed.zip
     - name: Build
       run: cargo build --verbose
-    - name: Test
+    - name: Test with fixed schedule
       run: cargo test --verbose
