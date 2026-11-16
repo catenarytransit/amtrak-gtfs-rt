@@ -41,7 +41,7 @@ use gtfs_realtime::FeedEntity;
 use gtfs_realtime::FeedMessage;
 use gtfs_structures::Gtfs;
 use jiff::{
-    ToSpan, Timestamp,
+    Timestamp, ToSpan,
     civil::{Date, DateTime, Weekday},
 };
 use std::collections::HashMap;
