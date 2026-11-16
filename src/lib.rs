@@ -389,6 +389,28 @@ fn runs_on_service_day(gtfs: &Gtfs, service_id: &str, day: Date) -> bool {
     }
 }
 
+/// Amtrak's live feed labels some Hartford Line trains as Northeast Regional.
+/// Resolve those against the Hartford Line GTFS route using train number,
+/// origin and departure time, without relaxing schedule validation.
+fn match_hartford_line_departure(
+    gtfs: &Gtfs,
+    train_number: &str,
+    origin_stop_id: &str,
+    departure: Timestamp,
+) -> Option<(String, Date, String)> {
+    let mut matches = gtfs.routes.values()
+        .filter(|route| route.long_name.as_deref() == Some("Amtrak Hartford Line"))
+        .filter_map(|route| {
+            match_scheduled_departure(
+                gtfs, Some(&route.id), train_number, origin_stop_id, departure,
+            ).map(|(trip_id, day)| (trip_id, day, route.id.clone()))
+        });
+    let result = matches.next()?;
+    // Do not arbitrarily assign a trip if two Hartford routes match.
+    if matches.next().is_some() { return None; }
+    Some(result)
+}
+
 fn feature_to_gtfs_unified(
     gtfs: &Gtfs,
     feature: &geojson::Feature,
@@ -590,7 +612,7 @@ fn feature_to_gtfs_unified(
         _ => None,
     };
 
-    let route_id: Option<String> = match route_name.as_deref() {
+    let mut route_id: Option<String> = match route_name.as_deref() {
         Some("Gold Runner") => Some("GR".to_string()),
         Some(name) => long_name_to_route_id_hashmap.get(name).cloned(),
         None => None,
@@ -601,9 +623,22 @@ fn feature_to_gtfs_unified(
     let origin_stop_id = feature.properties.as_ref()
         .and_then(|properties| properties.get("OrigCode"))
         .and_then(|value| value.as_str());
-    let scheduled_match = trip_name.as_deref().zip(origin_stop_id).and_then(|(number, stop)| {
+    let mut scheduled_match = trip_name.as_deref().zip(origin_stop_id).and_then(|(number, stop)| {
         match_scheduled_departure(gtfs, route_id.as_deref(), number, stop, origin_timestamp)
     });
+    // Hartford Line trains appear as "Northeast Regional" in Amtrak realtime,
+    // but belong to "Amtrak Hartford Line" in the GTFS schedule. Only use
+    // this fallback when the normal route-specific match did not succeed.
+    if scheduled_match.is_none() && route_name.as_deref() == Some("Northeast Regional") {
+        if let Some((number, stop)) = trip_name.as_deref().zip(origin_stop_id) {
+            if let Some((trip_id, day, hartford_route_id)) =
+                match_hartford_line_departure(gtfs, number, stop, origin_timestamp)
+            {
+                route_id = Some(hartford_route_id);
+                scheduled_match = Some((trip_id, day));
+            }
+        }
+    }
     if let Some((_, day)) = &scheduled_match {
         starting_service_date_new_york = *day;
     }
@@ -992,17 +1027,8 @@ mod tests {
             features_collection.features.len(),
             amtrak_results.as_ref().unwrap().unified_feed.entity.len()
         );
-        // Gold Runner (GR) and Hartford Line are exempt from the formal
-        // scheduled-trip assertion. Other assigned routes must still match.
-        let exempt_route = |route_id: &str| {
-            route_id == "GR"
-                || gtfs.routes.get(route_id).is_some_and(|route| {
-                    route.long_name.as_deref().is_some_and(|name| {
-                        name.eq_ignore_ascii_case("Hartford Line")
-                            || name.eq_ignore_ascii_case("Harford Line")
-                    })
-                })
-        };
+        // Only Gold Runner uses train-number identity without a formal GTFS
+        // schedule match; Hartford Line must match its scheduled trip.
         let without_trip: Vec<_> = amtrak_results
             .as_ref()
             .unwrap()
@@ -1011,7 +1037,7 @@ mod tests {
             .iter()
             .filter(|entity| {
                 entity.trip_update.as_ref().is_some_and(|update| {
-                    update.trip.route_id.as_deref().is_some_and(|route| !exempt_route(route))
+                    update.trip.route_id.as_deref().is_some_and(|route| route != "GR")
                         && update.trip.trip_id.is_none()
                 })
             })
@@ -1177,6 +1203,49 @@ mod tests {
             match_scheduled_departure(&gtfs, Some("SUNSET"), "2", "LAX", origin),
             Some(("current".into(), jiff::civil::date(2026, 11, 16)))
         );
+    }
+
+    #[test]
+    fn northeast_regional_hartford_line_matches_by_train_short_name() {
+        use std::sync::Arc;
+        let mut gtfs = Gtfs::default();
+        gtfs.routes.insert("HARTFORD".into(), gtfs_structures::Route {
+            id: "HARTFORD".into(),
+            long_name: Some("Amtrak Hartford Line".into()),
+            ..Default::default()
+        });
+        gtfs.trips.insert("hartford-scheduled".into(), gtfs_structures::Trip {
+            id: "hartford-scheduled".into(),
+            route_id: "HARTFORD".into(),
+            service_id: "hartford-day".into(),
+            trip_short_name: Some("0475".into()),
+            stop_times: vec![gtfs_structures::StopTime {
+                stop: Arc::new(gtfs_structures::Stop {
+                    id: "NHV".into(),
+                    ..Default::default()
+                }),
+                departure_time: Some(12 * 3600),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        gtfs.calendar_dates.insert("hartford-day".into(), vec![
+            gtfs_structures::CalendarDate {
+                service_id: "hartford-day".into(),
+                date: "2026-11-16".parse().unwrap(),
+                exception_type: gtfs_structures::Exception::Added,
+            },
+        ]);
+        let departure = origin_departure("11/16/2026 12:00:00 PM", 'E');
+        assert_eq!(
+            match_hartford_line_departure(&gtfs, "475", "NHV", departure),
+            Some((
+                "hartford-scheduled".into(),
+                jiff::civil::date(2026, 11, 16),
+                "HARTFORD".into(),
+            ))
+        );
+        assert!(match_hartford_line_departure(&gtfs, "476", "NHV", departure).is_none());
     }
 
     #[test]
