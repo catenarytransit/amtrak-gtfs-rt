@@ -389,26 +389,35 @@ fn runs_on_service_day(gtfs: &Gtfs, service_id: &str, day: Date) -> bool {
     }
 }
 
-/// Amtrak's live feed labels some Hartford Line trains as Northeast Regional.
-/// Resolve those against the Hartford Line GTFS route using train number,
-/// origin and departure time, without relaxing schedule validation.
-fn match_hartford_line_departure(
+/// Some Amtrak realtime Northeast Regional services are published under a
+/// separate GTFS route (Hartford Line or Valley Flyer). Resolve those only
+/// when train number, origin, departure instant and active calendar agree.
+fn match_northeast_regional_branch_departure(
     gtfs: &Gtfs,
     train_number: &str,
     origin_stop_id: &str,
     departure: Timestamp,
 ) -> Option<(String, Date, String)> {
     let mut matches = gtfs.routes.values()
-        .filter(|route| route.long_name.as_deref() == Some("Amtrak Hartford Line"))
+        .filter(|route| matches_northeast_regional_branch_name(route.long_name.as_deref()))
         .filter_map(|route| {
             match_scheduled_departure(
                 gtfs, Some(&route.id), train_number, origin_stop_id, departure,
             ).map(|(trip_id, day)| (trip_id, day, route.id.clone()))
         });
     let result = matches.next()?;
-    // Do not arbitrarily assign a trip if two Hartford routes match.
+    // Do not select an arbitrary trip if both branches match.
     if matches.next().is_some() { return None; }
     Some(result)
+}
+
+fn matches_northeast_regional_branch_name(long_name: Option<&str>) -> bool {
+    long_name.is_some_and(|name| {
+        name.eq_ignore_ascii_case("Amtrak Hartford Line")
+            || name.eq_ignore_ascii_case("Hartford Line")
+            || name.eq_ignore_ascii_case("Amtrak Valley Flyer")
+            || name.eq_ignore_ascii_case("Valley Flyer")
+    })
 }
 
 fn feature_to_gtfs_unified(
@@ -626,15 +635,15 @@ fn feature_to_gtfs_unified(
     let mut scheduled_match = trip_name.as_deref().zip(origin_stop_id).and_then(|(number, stop)| {
         match_scheduled_departure(gtfs, route_id.as_deref(), number, stop, origin_timestamp)
     });
-    // Hartford Line trains appear as "Northeast Regional" in Amtrak realtime,
-    // but belong to "Amtrak Hartford Line" in the GTFS schedule. Only use
-    // this fallback when the normal route-specific match did not succeed.
+    // Realtime labels Hartford Line and Valley Flyer trains as Northeast
+    // Regional. Only fall back to those GTFS routes after a failed normal
+    // match; require exact train number, origin and scheduled departure.
     if scheduled_match.is_none() && route_name.as_deref() == Some("Northeast Regional") {
         if let Some((number, stop)) = trip_name.as_deref().zip(origin_stop_id) {
-            if let Some((trip_id, day, hartford_route_id)) =
-                match_hartford_line_departure(gtfs, number, stop, origin_timestamp)
+            if let Some((trip_id, day, branch_route_id)) =
+                match_northeast_regional_branch_departure(gtfs, number, stop, origin_timestamp)
             {
-                route_id = Some(hartford_route_id);
+                route_id = Some(branch_route_id);
                 scheduled_match = Some((trip_id, day));
             }
         }
@@ -1238,14 +1247,58 @@ mod tests {
         ]);
         let departure = origin_departure("11/16/2026 12:00:00 PM", 'E');
         assert_eq!(
-            match_hartford_line_departure(&gtfs, "475", "NHV", departure),
+            match_northeast_regional_branch_departure(&gtfs, "475", "NHV", departure),
             Some((
                 "hartford-scheduled".into(),
                 jiff::civil::date(2026, 11, 16),
                 "HARTFORD".into(),
             ))
         );
-        assert!(match_hartford_line_departure(&gtfs, "476", "NHV", departure).is_none());
+        assert!(match_northeast_regional_branch_departure(&gtfs, "476", "NHV", departure).is_none());
+    }
+
+    #[test]
+    fn northeast_regional_valley_flyer_matches_by_train_short_name() {
+        use std::sync::Arc;
+        let mut gtfs = Gtfs::default();
+        gtfs.routes.insert("VALLEY".into(), gtfs_structures::Route {
+            id: "VALLEY".into(),
+            long_name: Some("Amtrak Valley Flyer".into()),
+            ..Default::default()
+        });
+        gtfs.trips.insert("valley-scheduled".into(), gtfs_structures::Trip {
+            id: "valley-scheduled".into(),
+            route_id: "VALLEY".into(),
+            service_id: "valley-day".into(),
+            trip_short_name: Some("0486".into()),
+            stop_times: vec![gtfs_structures::StopTime {
+                stop: Arc::new(gtfs_structures::Stop {
+                    id: "NHV".into(),
+                    ..Default::default()
+                }),
+                departure_time: Some(15 * 3600),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        gtfs.calendar_dates.insert("valley-day".into(), vec![
+            gtfs_structures::CalendarDate {
+                service_id: "valley-day".into(),
+                date: "2026-11-16".parse().unwrap(),
+                exception_type: gtfs_structures::Exception::Added,
+            },
+        ]);
+        let departure = origin_departure("11/16/2026 3:00:00 PM", 'E');
+        assert_eq!(
+            match_northeast_regional_branch_departure(&gtfs, "486", "NHV", departure),
+            Some((
+                "valley-scheduled".into(),
+                jiff::civil::date(2026, 11, 16),
+                "VALLEY".into(),
+            ))
+        );
+        assert!(match_northeast_regional_branch_departure(&gtfs, "487", "NHV", departure).is_none());
+        assert!(match_northeast_regional_branch_departure(&gtfs, "486", "NYP", departure).is_none());
     }
 
     #[test]
