@@ -618,6 +618,31 @@ fn feature_to_gtfs_unified(
                 gtfs.routes.get(route_id.as_str()).unwrap().long_name,
                 starting_service_date_new_york
             );
+
+            println!("Possible trips for this train:");
+            for trip in gtfs.trips.values().filter(|trip| {
+                trip.route_id == *route_id
+                    && trip.trip_short_name.as_deref().is_some_and(|s| s == trip_name.as_ref().unwrap())
+            }) {
+                println!(
+                    "  trip_id: {}, service_id: {}, trip_short_name: {:?}",
+                    trip.id, trip.service_id, trip.trip_short_name
+                );
+                //print service date
+                if let Some(calendar) = gtfs.calendar.get(&trip.service_id) {
+                    println!(
+                        "    service dates: {} to {}, weekdays: {}{}{}{}{}{}{}",
+                        calendar.start_date, calendar.end_date,
+                        if calendar.monday { "M" } else { "-" },
+                        if calendar.tuesday { "T" } else { "-" },
+                        if calendar.wednesday { "W" } else { "-" },
+                        if calendar.thursday { "R" } else { "-" },
+                        if calendar.friday { "F" } else { "-" },
+                        if calendar.saturday { "S" } else { "-" },
+                        if calendar.sunday { "U" } else { "-" },
+                    );
+                }
+            }
         }
     }
 
