@@ -523,7 +523,14 @@ fn feature_to_gtfs_unified(
                 short.trim_start_matches('0') == trip_name.as_deref().unwrap_or("")
             }))
             .take(8)
-            .map(|trip| format!("{} / {} / {}", trip.id, trip.trip_short_name.as_deref().unwrap_or(""), trip.service_id))
+            .map(|trip| {
+                let cal = gtfs.calendar.get(&trip.service_id);
+                format!("{} / {} / {} / calendar={:?} / exceptions={:?}",
+                    trip.id, trip.trip_short_name.as_deref().unwrap_or(""), trip.service_id,
+                    cal.map(|c| format!("{}..{} weekdays={:?}", c.start_date, c.end_date,
+                        [c.monday, c.tuesday, c.wednesday, c.thursday, c.friday, c.saturday, c.sunday])),
+                    gtfs.calendar_dates.get(&trip.service_id).map(|dates| dates.len()))
+            })
             .collect();
         let sample: Vec<_> = route_trips.iter().take(5)
             .map(|trip| format!("{} / {} / {}", trip.id, trip.trip_short_name.as_deref().unwrap_or(""), trip.service_id))
