@@ -932,6 +932,54 @@ mod tests {
     }
 
     #[test]
+    fn late_los_angeles_departure_matches_next_eastern_service_day() {
+        // GTFS schedule dates are Eastern-based, not the origin's local day.
+        // 22:00 Sunday in Los Angeles is 01:00 Monday in New York.
+        let origin = origin_departure("11/15/2026 10:00:00 PM", 'P');
+        let pacific_date = tz_char_to_tz('P').to_datetime(origin).date();
+        let eastern_date = timezone::get("America/New_York").to_datetime(origin).date();
+        assert_eq!(pacific_date, jiff::civil::date(2026, 11, 15));
+        assert_eq!(eastern_date, jiff::civil::date(2026, 11, 16));
+
+        let mut gtfs = Gtfs::default();
+        gtfs.trips.insert("train-595-sun".into(), gtfs_structures::Trip {
+            id: "train-595-sun".into(),
+            route_id: "PAC_SURF".into(),
+            service_id: "sunday".into(),
+            trip_short_name: Some("0595".into()),
+            ..Default::default()
+        });
+        gtfs.trips.insert("train-595-mon".into(), gtfs_structures::Trip {
+            id: "train-595-mon".into(),
+            route_id: "PAC_SURF".into(),
+            service_id: "monday".into(),
+            trip_short_name: Some("595".into()),
+            ..Default::default()
+        });
+        for (service_id, date) in [
+            ("sunday", "2026-11-15"),
+            ("monday", "2026-11-16"),
+        ] {
+            gtfs.calendar_dates.insert(service_id.into(), vec![gtfs_structures::CalendarDate {
+                service_id: service_id.into(),
+                date: date.parse().unwrap(),
+                exception_type: gtfs_structures::Exception::Added,
+            }]);
+        }
+
+        assert_eq!(
+            match_scheduled_trip(&gtfs, Some("PAC_SURF"), "595", eastern_date),
+            Some("train-595-mon".to_string()),
+            "Must match the next day's Eastern-based GTFS service"
+        );
+        assert_eq!(
+            match_scheduled_trip(&gtfs, Some("PAC_SURF"), "595", pacific_date),
+            Some("train-595-sun".to_string()),
+            "This is the wrong trip when local Pacific dates are used"
+        );
+    }
+
+    #[test]
     fn removed_service_does_not_get_a_trip_id() {
         let day = jiff::civil::date(2026, 11, 16);
         let mut gtfs = Gtfs::default();
