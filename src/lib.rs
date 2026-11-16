@@ -172,7 +172,9 @@ fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakAr
                     serde_json::from_str(station_text);
 
                 if amtrak_arrival.is_ok() {
-                    amtrak_arrival_jsons.push(amtrak_arrival.unwrap());
+                    let mut arrival = amtrak_arrival.unwrap();
+                    arrival.tz = effective_station_tz(&arrival.code, arrival.tz);
+                    amtrak_arrival_jsons.push(arrival);
                 } else {
                     println!(
                         "Error parsing amtrak arrival json, {}\n{}",
@@ -607,7 +609,12 @@ fn feature_to_gtfs_unified(
         })
         .collect::<Vec<gtfs_realtime::trip_update::StopTimeUpdate>>();
 
-    let origin_timestamp = origin_departure(&origin_time_string, origin_tz);
+    let origin_stop_code = feature.properties.as_ref()
+        .and_then(|properties| properties.get("OrigCode"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let origin_tz = effective_station_tz(origin_stop_code, origin_tz);
+    let origin_timestamp = origin_departure_at_station(&origin_time_string, origin_tz, origin_stop_code);
 
     let mut starting_service_date_new_york = timezone::get("America/New_York")
         .to_datetime(origin_timestamp)
@@ -816,6 +823,17 @@ pub fn make_gtfs_header() -> gtfs_realtime::FeedHeader {
         ),
         feed_version: None,
     }
+}
+
+// Amtrak occasionally labels Vancouver, BC (VAC) as Mountain time even
+// though the station observes Pacific time. Prefer the station's actual
+// timezone over the unreliable one-letter feed field.
+fn effective_station_tz(code: &str, reported_tz: char) -> char {
+    if code == "VAC" { 'P' } else { reported_tz }
+}
+
+fn origin_departure_at_station(timestamp_text: &str, tz: char, origin_code: &str) -> Timestamp {
+    origin_departure(timestamp_text, effective_station_tz(origin_code, tz))
 }
 
 fn tz_char_to_tz(tz: char) -> jiff::tz::TimeZone {
@@ -1290,6 +1308,25 @@ mod tests {
             ))
         );
         assert!(match_northeast_regional_branch_departure(&gtfs, "476", "NHV", departure).is_none());
+    }
+
+    #[test]
+    fn cascades_vancouver_bc_origin_uses_pacific_time_in_winter_and_summer() {
+        // Amtrak realtime marks VAC as M, but Vancouver, BC follows Pacific
+        // time. November 16 is PST (UTC-8), while July 16 is PDT (UTC-7).
+        let winter = origin_departure_at_station("11/16/2026 8:25:00 AM", 'M', "VAC");
+        let summer = origin_departure_at_station("7/16/2026 8:25:00 AM", 'M', "VAC");
+        assert_eq!(winter.to_string(), "2026-11-16T16:25:00Z");
+        assert_eq!(summer.to_string(), "2026-07-16T15:25:00Z");
+        assert_eq!(effective_station_tz("VAC", 'M'), 'P');
+        assert_eq!(effective_station_tz("NYP", 'E'), 'E');
+        let station: AmtrakArrivalJson = serde_json::from_str(
+            r#"{"code":"VAC","tz":"M","bus":false,"schcmnt":"","autoarr":false,"autodep":false}"#
+        ).unwrap();
+        assert_eq!(
+            time_and_tz_to_unix("11/16/2026 08:25:00", effective_station_tz(&station.code, station.tz)),
+            Some(winter.as_second())
+        );
     }
 
     #[test]
