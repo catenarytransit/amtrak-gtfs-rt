@@ -1,16 +1,12 @@
 use amtrak_gtfs_rt::origin_departure;
-use jiff::{civil::date, tz::TimeZone, Timestamp};
+use jiff::Timestamp;
 
 #[test]
-fn origin_departure_preserves_local_weekday_and_new_york_service_date() {
-    // Late Pacific departures fall on the following date in New York.
+fn origin_departure_preserves_pacific_to_new_york_date_boundary() {
+    // 23:30 Pacific is 02:30 New York the following day.
     let instant = origin_departure("11/15/2026 11:30:00 PM", 'P');
-    let pacific = TimeZone::get("America/Los_Angeles").unwrap();
-    let new_york = TimeZone::get("America/New_York").unwrap();
-
-    assert_eq!(pacific.to_datetime(instant).date(), date(2026, 11, 15));
-    assert_eq!(new_york.to_datetime(instant).date(), date(2026, 11, 16));
-    assert_eq!(pacific.to_datetime(instant).weekday(), jiff::civil::Weekday::Sunday);
+    let expected: Timestamp = "2026-11-16T07:30:00Z".parse().unwrap();
+    assert_eq!(instant, expected);
 }
 
 #[test]
