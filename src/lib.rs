@@ -610,7 +610,7 @@ fn feature_to_gtfs_unified(
     let starting_yyyy_mm_dd_in_new_york = starting_service_date_new_york
         .strftime("%Y%m%d").to_string();
     let trip_id = scheduled_match.map(|(id, _)| id);
-    if trip_id.is_none() {
+    if trip_id.is_none() && route_id.as_deref() != Some("GR") {
         if let Some(route_id) = &route_id {
 
             let route_name = gtfs.routes.get(route_id.as_str()).and_then(|route| route.long_name.as_ref());
