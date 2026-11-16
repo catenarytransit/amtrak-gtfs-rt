@@ -635,9 +635,25 @@ fn feature_to_gtfs_unified(
     let mut scheduled_match = trip_name.as_deref().zip(origin_stop_id).and_then(|(number, stop)| {
         match_scheduled_departure(gtfs, route_id.as_deref(), number, stop, origin_timestamp)
     });
-    // Realtime labels Hartford Line and Valley Flyer trains as Northeast
-    // Regional. Only fall back to those GTFS routes after a failed normal
-    // match; require exact train number, origin and scheduled departure.
+    // Amtrak route labels do not always match the published GTFS route names
+    // (e.g. "Keystone" vs. "Keystone Service", Hartford Line and Valley Flyer
+    // vs. "Northeast Regional"). After the route-specific lookup fails, use
+    // train short name, origin and active departure across all GTFS routes.
+    // The matcher rejects equally plausible trips rather than guessing.
+    if scheduled_match.is_none() && route_name.as_deref() != Some("Gold Runner") {
+        if let Some((number, stop)) = trip_name.as_deref().zip(origin_stop_id) {
+            if let Some((id, day)) =
+                match_scheduled_departure(gtfs, None, number, stop, origin_timestamp)
+            {
+                if let Some(trip) = gtfs.trips.get(&id) {
+                    route_id = Some(trip.route_id.clone());
+                    scheduled_match = Some((id, day));
+                }
+            }
+        }
+    }
+    // Limit the original named fallback to Northeast Regional when a unique
+    // across-all-routes match could not be established.
     if scheduled_match.is_none() && route_name.as_deref() == Some("Northeast Regional") {
         if let Some((number, stop)) = trip_name.as_deref().zip(origin_stop_id) {
             if let Some((trip_id, day, branch_route_id)) =
@@ -1255,6 +1271,47 @@ mod tests {
             ))
         );
         assert!(match_northeast_regional_branch_departure(&gtfs, "476", "NHV", departure).is_none());
+    }
+
+    #[test]
+    fn keystone_route_label_falls_back_to_gtfs_trip_short_name() {
+        use std::sync::Arc;
+        let mut gtfs = Gtfs::default();
+        gtfs.routes.insert("KEYSTONE".into(), gtfs_structures::Route {
+            id: "KEYSTONE".into(),
+            long_name: Some("Keystone Service".into()),
+            ..Default::default()
+        });
+        gtfs.trips.insert("keystone-trip".into(), gtfs_structures::Trip {
+            id: "keystone-trip".into(),
+            route_id: "KEYSTONE".into(),
+            service_id: "keystone-monday".into(),
+            trip_short_name: Some("0647".into()),
+            stop_times: vec![gtfs_structures::StopTime {
+                stop: Arc::new(gtfs_structures::Stop {
+                    id: "NYP".into(),
+                    ..Default::default()
+                }),
+                departure_time: Some(14 * 3600 + 11 * 60),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        gtfs.calendar_dates.insert("keystone-monday".into(), vec![
+            gtfs_structures::CalendarDate {
+                service_id: "keystone-monday".into(),
+                date: "2026-11-16".parse().unwrap(),
+                exception_type: gtfs_structures::Exception::Added,
+            },
+        ]);
+        let departure = origin_departure("11/16/2026 2:11:00 PM", 'E');
+        let matched = match_scheduled_departure(&gtfs, None, "647", "NYP", departure);
+        assert_eq!(
+            matched,
+            Some(("keystone-trip".into(), jiff::civil::date(2026, 11, 16)))
+        );
+        assert_eq!(gtfs.trips.get(&matched.unwrap().0).unwrap().route_id, "KEYSTONE");
+        assert!(match_scheduled_departure(&gtfs, None, "647", "PHL", departure).is_none());
     }
 
     #[test]
