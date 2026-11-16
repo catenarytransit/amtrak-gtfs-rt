@@ -270,10 +270,15 @@ fn match_scheduled_trip(
                 || normalized(&trip.id) == number)
     }).collect();
 
-    // Prefer a scheduled trip on this exact service date. Multiple trips with
-    // the same number but different service calendars are common in Amtrak GTFS.
+    // For a unique route+train number, retain the known static trip ID even
+    // when Track-A-Train lags behind the latest GTFS service calendar. This
+    // restores the behavior before the strict calendar filtering regression.
+    if candidates.len() == 1 {
+        return Some(candidates[0].id.clone());
+    }
+
+    // Multiple scheduled variants require an exact Eastern service-date match.
     candidates.retain(|trip| runs_on(gtfs, &trip.service_id, service_date));
-    candidates.sort_by(|a, b| a.id.cmp(&b.id));
     if candidates.len() == 1 {
         Some(candidates[0].id.clone())
     } else {
@@ -469,7 +474,6 @@ fn feature_to_gtfs_unified(
 
     // ASM alert dates and service weekdays use the train's origin-local date.
     let origin_local_time = tz_char_to_tz(origin_tz).to_datetime(origin_timestamp);
-    let origin_weekday = origin_local_time.weekday();
 
     let route_name: Option<String> = match feature.properties.as_ref().unwrap().get("RouteName") {
         Some(a) => match a {
@@ -979,6 +983,23 @@ mod tests {
             match_scheduled_trip(&gtfs, Some("PAC_SURF"), "595", pacific_date),
             Some("train-595-sun".to_string()),
             "This is the wrong trip when local Pacific dates are used"
+        );
+    }
+
+    #[test]
+    fn unique_trip_is_retained_when_realtime_calendar_is_stale() {
+        let mut gtfs = Gtfs::default();
+        gtfs.trips.insert("scheduled-40".into(), gtfs_structures::Trip {
+            id: "scheduled-40".into(),
+            route_id: "R40".into(),
+            service_id: "no-longer-active".into(),
+            trip_short_name: Some("40".into()),
+            ..Default::default()
+        });
+        let date = jiff::civil::date(2026, 11, 14);
+        assert_eq!(
+            match_scheduled_trip(&gtfs, Some("R40"), "40", date),
+            Some("scheduled-40".to_string())
         );
     }
 
