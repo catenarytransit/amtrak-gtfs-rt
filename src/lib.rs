@@ -328,7 +328,7 @@ fn match_scheduled_departure(
     let mut matches: Vec<(i64, String, Date)> = Vec::new();
     for offset in 0..=days_to_check {
         let service_date = eastern_day - offset.days();
-        let Ok(midnight) = service_date.at(0, 0, 0, 0).to_zoned(eastern.clone()) else { continue };
+        let Ok(midnight) = service_date.at(0, 0, 0, 0).to_zoned_datetime(eastern.clone()) else { continue };
         let midnight_seconds = midnight.timestamp().as_second();
         for (trip, departure_seconds) in &candidates {
             if !runs_on_service_day(gtfs, &trip.service_id, service_date) { continue }
