@@ -1,7 +1,6 @@
 use gtfs_realtime::FeedEntity;
 use gtfs_structures::Gtfs;
 use scraper::{Html, Selector};
-use std::time::SystemTime;
 
 pub async fn fetch_pacific_surfliner_advisories(
     client: &reqwest::Client,

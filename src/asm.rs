@@ -127,7 +127,6 @@ pub fn asm_alert_to_gtfs_rt(
         return None;
     }
 
-    let mut alert = gtfs_realtime::Alert::default();
     let mut description = gtfs_realtime::TranslatedString::default();
 
     let text = asm_alerts

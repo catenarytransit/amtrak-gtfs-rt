@@ -41,10 +41,9 @@ use gtfs_realtime::FeedEntity;
 use gtfs_realtime::FeedMessage;
 use gtfs_structures::Gtfs;
 use jiff::{
-    ToSpan, Zoned,
+    ToSpan, Timestamp,
     civil::{Date, DateTime, Weekday},
 };
-use scraper::{Html, Selector};
 use std::collections::HashMap;
 use std::time::SystemTime;
 pub mod asm;
@@ -227,7 +226,7 @@ fn feature_to_gtfs_unified(
 ) -> FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
-        geojson::Value::Point {
+        geojson::GeometryValue::Point {
             coordinates: coords,
         } => Some(coords),
         _ => None,
@@ -401,10 +400,10 @@ fn feature_to_gtfs_unified(
         })
         .collect::<Vec<gtfs_realtime::trip_update::StopTimeUpdate>>();
 
-    let origin_local_time = origin_departure(&origin_time_string, origin_tz);
+    let origin_timestamp = origin_departure(&origin_time_string, origin_tz);
 
-    let mut starting_service_date_new_york = origin_local_time
-        .with_time_zone(timezone::get("America/New_York"))
+    let mut starting_service_date_new_york = timezone::get("America/New_York")
+        .to_datetime(origin_timestamp)
         .date();
 
     // Check if the computed date is off by ~24 hours by comparing scheduled vs realtime
@@ -419,7 +418,9 @@ fn feature_to_gtfs_unified(
         .strftime("%Y%m%d")
         .to_string();
 
-    let origin_weekday = origin_local_time.weekday();
+    let origin_weekday = tz_char_to_tz(origin_tz)
+        .to_datetime(origin_timestamp)
+        .weekday();
 
     let route_name: Option<String> = match feature.properties.as_ref().unwrap().get("RouteName") {
         Some(a) => match a {
@@ -701,12 +702,10 @@ fn detect_date_offset_from_delay(features_list: &[AmtrakArrivalJson]) -> i32 {
 }
 
 //for origin departure conversion to local time representation
-pub fn origin_departure(timestamp_text: &str, tz: char) -> Zoned {
+pub fn origin_departure(timestamp_text: &str, tz: char) -> Timestamp {
     let dt = DateTime::strptime("%m/%d/%Y %l:%M:%S %p", timestamp_text).unwrap();
     let tz = tz_char_to_tz(tz);
-    timezone::latest_timestamp(&tz, dt)
-        .expect("valid origin departure")
-        .to_zoned(tz)
+    timezone::latest_timestamp(&tz, dt).expect("valid origin departure")
 }
 
 // Time is formatted 11/18/2023 4:58:09 PM.
