@@ -348,13 +348,32 @@ fn match_scheduled_departure(
     }
     matches.sort_by_key(|candidate| candidate.0);
     if matches.is_empty() {
-        // Include enough context to separate absent trips, calendar
-        // mismatches and timestamp mismatches in production diagnostics.
+        // Show each active candidate's absolute departure and discrepancy,
+        // so upstream GTFS calendar errors can be distinguished from
+        // stop_time timezone offsets without guessing.
         eprintln!(
-            "Amtrak schedule match failed: train={}, route={:?}, origin={},              eastern_departure={}, candidates_with_origin={}, checked_days={}",
+            "Amtrak schedule match failed: train={}, route={:?}, origin={}, eastern_departure={}, candidates_with_origin={}, checked_days={}",
             train_number, route_id, origin_stop_id, departure,
             candidates.len(), days_to_check + 1,
         );
+        for offset in 0..=days_to_check {
+            let day = eastern_day - offset.days();
+            let Ok(midnight) = day.at(0, 0, 0, 0).to_zoned_datetime(eastern.clone()) else {
+                continue;
+            };
+            for (trip, seconds) in &candidates {
+                if !runs_on_service_day(gtfs, &trip.service_id, day) {
+                    continue;
+                }
+                if let Some(instant) = midnight.timestamp().as_second().checked_add(i64::from(*seconds)) {
+                    eprintln!(
+                        "  active candidate trip={} route={} service_day={} origin_seconds={} scheduled_unix={} difference_seconds={}",
+                        trip.id, trip.route_id, day, seconds, instant,
+                        instant - departure.as_second(),
+                    );
+                }
+            }
+        }
     }
     let best = matches.first()?;
     if matches.get(1).is_some_and(|other| other.0 == best.0) {
