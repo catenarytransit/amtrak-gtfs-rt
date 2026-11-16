@@ -493,6 +493,9 @@ fn feature_to_gtfs_unified(
         None => None,
     };
 
+    // Amtrak's GTFS calendar is Eastern-based. A late departure in Los Angeles
+    // can belong to the next service day even though it is still the previous
+    // calendar day at the origin. Do not use origin_local_time.date() here.
     let trip_id = trip_name.as_deref().and_then(|number| {
         match_scheduled_trip(gtfs, route_id.as_deref(), number, starting_service_date_new_york)
     });
