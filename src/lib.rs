@@ -290,7 +290,6 @@ fn match_scheduled_trip(
     }
 }
 
-
 /* A GTFS service day begins at midnight in the agency timezone, but its
  * stop_times can exceed 24 hours. The civil date of OrigSchDep in Eastern
  * time is therefore NOT necessarily the GTFS service date. */
@@ -312,22 +311,29 @@ fn match_scheduled_departure(
     // the actual overflow in candidate first-stop departure times, allowing
     // one extra day for DST transitions. Do not test future service days:
     // GTFS stop times are nonnegative offsets from service-day midnight.
-    let candidates: Vec<_> = gtfs.trips.values().filter_map(|trip| {
-        if !route_id.is_none_or(|route| trip.route_id == route) {
-            return None;
-        }
-        if !trip.trip_short_name.as_deref().is_some_and(|s| normalized(s) == normalized(train_number))
-            && normalized(&trip.id) != normalized(train_number)
-        {
-            return None;
-        }
-        // Some GTFS trips contain a leading non-revenue stop or a stop with
-        // no departure. Match Amtrak's explicit OrigCode, not the first row.
-        let origin_stop = trip.stop_times.iter()
-            .find(|stop_time| stop_time.stop.id == origin_stop_id
-                && stop_time.departure_time.is_some())?;
-        Some((trip, origin_stop.departure_time?))
-    }).collect();
+    let candidates: Vec<_> = gtfs
+        .trips
+        .values()
+        .filter_map(|trip| {
+            if !route_id.is_none_or(|route| trip.route_id == route) {
+                return None;
+            }
+            if !trip
+                .trip_short_name
+                .as_deref()
+                .is_some_and(|s| normalized(s) == normalized(train_number))
+                && normalized(&trip.id) != normalized(train_number)
+            {
+                return None;
+            }
+            // Some GTFS trips contain a leading non-revenue stop or a stop with
+            // no departure. Match Amtrak's explicit OrigCode, not the first row.
+            let origin_stop = trip.stop_times.iter().find(|stop_time| {
+                stop_time.stop.id == origin_stop_id && stop_time.departure_time.is_some()
+            })?;
+            Some((trip, origin_stop.departure_time?))
+        })
+        .collect();
     let max_origin_seconds = candidates.iter().map(|(_, seconds)| *seconds).max()?;
     // Test current date and previous dates that can reach the observed
     // departure. A safety day accommodates the 23/25-hour DST boundary.
@@ -335,12 +341,22 @@ fn match_scheduled_departure(
     let mut matches: Vec<(i64, String, Date)> = Vec::new();
     for offset in 0..=days_to_check {
         let service_date = eastern_day - offset.days();
-        let Ok(midnight) = service_date.at(0, 0, 0, 0).to_zoned_datetime(eastern.clone()) else { continue };
+        let Ok(midnight) = service_date
+            .at(0, 0, 0, 0)
+            .to_zoned_datetime(eastern.clone())
+        else {
+            continue;
+        };
         let midnight_seconds = midnight.timestamp().as_second();
         for (trip, departure_seconds) in &candidates {
-            if !runs_on_service_day(gtfs, &trip.service_id, service_date) { continue }
-            let Some(scheduled_seconds) = midnight_seconds
-                .checked_add(i64::from(*departure_seconds)) else { continue };
+            if !runs_on_service_day(gtfs, &trip.service_id, service_date) {
+                continue;
+            }
+            let Some(scheduled_seconds) =
+                midnight_seconds.checked_add(i64::from(*departure_seconds))
+            else {
+                continue;
+            };
             let discrepancy = (scheduled_seconds - departure.as_second()).abs();
             // Only minute-scale timetable rounding is tolerated.
             if discrepancy <= 300 {
@@ -355,8 +371,12 @@ fn match_scheduled_departure(
         // stop_time timezone offsets without guessing.
         eprintln!(
             "Amtrak schedule match failed: train={}, route={:?}, origin={}, eastern_departure={}, candidates_with_origin={}, checked_days={}",
-            train_number, route_id, origin_stop_id, departure,
-            candidates.len(), days_to_check + 1,
+            train_number,
+            route_id,
+            origin_stop_id,
+            departure,
+            candidates.len(),
+            days_to_check + 1,
         );
         for offset in 0..=days_to_check {
             let day = eastern_day - offset.days();
@@ -367,10 +387,18 @@ fn match_scheduled_departure(
                 if !runs_on_service_day(gtfs, &trip.service_id, day) {
                     continue;
                 }
-                if let Some(instant) = midnight.timestamp().as_second().checked_add(i64::from(*seconds)) {
+                if let Some(instant) = midnight
+                    .timestamp()
+                    .as_second()
+                    .checked_add(i64::from(*seconds))
+                {
                     eprintln!(
                         "  active candidate trip={} route={} service_day={} origin_seconds={} scheduled_unix={} difference_seconds={}",
-                        trip.id, trip.route_id, day, seconds, instant,
+                        trip.id,
+                        trip.route_id,
+                        day,
+                        seconds,
+                        instant,
                         instant - departure.as_second(),
                     );
                 }
@@ -395,10 +423,18 @@ fn runs_on_service_day(gtfs: &Gtfs, service_id: &str, day: Date) -> bool {
             return exception.exception_type == gtfs_structures::Exception::Added;
         }
     }
-    let Some(calendar) = gtfs.calendar.get(service_id) else { return false };
-    let Ok(first) = calendar.start_date.to_string().parse::<Date>() else { return false };
-    let Ok(last) = calendar.end_date.to_string().parse::<Date>() else { return false };
-    if day < first || day > last { return false }
+    let Some(calendar) = gtfs.calendar.get(service_id) else {
+        return false;
+    };
+    let Ok(first) = calendar.start_date.to_string().parse::<Date>() else {
+        return false;
+    };
+    let Ok(last) = calendar.end_date.to_string().parse::<Date>() else {
+        return false;
+    };
+    if day < first || day > last {
+        return false;
+    }
     match day.weekday() {
         Weekday::Monday => calendar.monday,
         Weekday::Tuesday => calendar.tuesday,
@@ -419,16 +455,25 @@ fn match_northeast_regional_branch_departure(
     origin_stop_id: &str,
     departure: Timestamp,
 ) -> Option<(String, Date, String)> {
-    let mut matches = gtfs.routes.values()
+    let mut matches = gtfs
+        .routes
+        .values()
         .filter(|route| matches_northeast_regional_branch_name(route.long_name.as_deref()))
         .filter_map(|route| {
             match_scheduled_departure(
-                gtfs, Some(&route.id), train_number, origin_stop_id, departure,
-            ).map(|(trip_id, day)| (trip_id, day, route.id.clone()))
+                gtfs,
+                Some(&route.id),
+                train_number,
+                origin_stop_id,
+                departure,
+            )
+            .map(|(trip_id, day)| (trip_id, day, route.id.clone()))
         });
     let result = matches.next()?;
     // Do not select an arbitrary trip if both branches match.
-    if matches.next().is_some() { return None; }
+    if matches.next().is_some() {
+        return None;
+    }
     Some(result)
 }
 
@@ -609,12 +654,15 @@ fn feature_to_gtfs_unified(
         })
         .collect::<Vec<gtfs_realtime::trip_update::StopTimeUpdate>>();
 
-    let origin_stop_code = feature.properties.as_ref()
+    let origin_stop_code = feature
+        .properties
+        .as_ref()
         .and_then(|properties| properties.get("OrigCode"))
         .and_then(|value| value.as_str())
         .unwrap_or("");
     let origin_tz = effective_station_tz(origin_stop_code, origin_tz);
-    let origin_timestamp = origin_departure_at_station(&origin_time_string, origin_tz, origin_stop_code);
+    let origin_timestamp =
+        origin_departure_at_station(&origin_time_string, origin_tz, origin_stop_code);
 
     let mut starting_service_date_new_york = timezone::get("America/New_York")
         .to_datetime(origin_timestamp)
@@ -655,12 +703,18 @@ fn feature_to_gtfs_unified(
 
     // Match the actual scheduled origin departure in absolute time, including
     // GTFS stop_times over 24 hours and calendar_dates exceptions.
-    let origin_stop_id = feature.properties.as_ref()
+    let origin_stop_id = feature
+        .properties
+        .as_ref()
         .and_then(|properties| properties.get("OrigCode"))
         .and_then(|value| value.as_str());
-    let mut scheduled_match = trip_name.as_deref().zip(origin_stop_id).and_then(|(number, stop)| {
-        match_scheduled_departure(gtfs, route_id.as_deref(), number, stop, origin_timestamp)
-    });
+    let mut scheduled_match =
+        trip_name
+            .as_deref()
+            .zip(origin_stop_id)
+            .and_then(|(number, stop)| {
+                match_scheduled_departure(gtfs, route_id.as_deref(), number, stop, origin_timestamp)
+            });
     // Amtrak route labels do not always match the published GTFS route names
     // (e.g. "Keystone" vs. "Keystone Service", Hartford Line and Valley Flyer
     // vs. "Northeast Regional"). After the route-specific lookup fails, use
@@ -694,24 +748,28 @@ fn feature_to_gtfs_unified(
         starting_service_date_new_york = *day;
     }
     let starting_yyyy_mm_dd_in_new_york = starting_service_date_new_york
-        .strftime("%Y%m%d").to_string();
+        .strftime("%Y%m%d")
+        .to_string();
     let trip_id = scheduled_match.map(|(id, _)| id);
     if trip_id.is_none() && route_id.as_deref() != Some("GR") {
         if let Some(route_id) = &route_id {
-
-            let route_name = gtfs.routes.get(route_id.as_str()).and_then(|route| route.long_name.as_ref());
+            let route_name = gtfs
+                .routes
+                .get(route_id.as_str())
+                .and_then(|route| route.long_name.as_ref());
 
             eprintln!(
                 "Unmatched scheduled train {:?}, route {:?}, Eastern service date {}",
-                trip_name,
-                route_name,
-                starting_service_date_new_york
+                trip_name, route_name, starting_service_date_new_york
             );
 
             println!("Possible trips for this train:");
             for trip in gtfs.trips.values().filter(|trip| {
                 trip.route_id == *route_id
-                    && trip.trip_short_name.as_deref().is_some_and(|s| s == trip_name.as_ref().unwrap())
+                    && trip
+                        .trip_short_name
+                        .as_deref()
+                        .is_some_and(|s| s == trip_name.as_ref().unwrap())
             }) {
                 println!(
                     "  trip_id: {}, service_id: {}, trip_short_name: {:?}",
@@ -721,7 +779,8 @@ fn feature_to_gtfs_unified(
                 if let Some(calendar) = gtfs.calendar.get(&trip.service_id) {
                     println!(
                         "    service dates: {} to {}, weekdays: {}{}{}{}{}{}{}",
-                        calendar.start_date, calendar.end_date,
+                        calendar.start_date,
+                        calendar.end_date,
                         if calendar.monday { "M" } else { "-" },
                         if calendar.tuesday { "T" } else { "-" },
                         if calendar.wednesday { "W" } else { "-" },
@@ -1099,7 +1158,11 @@ mod tests {
             .iter()
             .filter(|entity| {
                 entity.trip_update.as_ref().is_some_and(|update| {
-                    update.trip.route_id.as_deref().is_some_and(|route| route != "GR")
+                    update
+                        .trip
+                        .route_id
+                        .as_deref()
+                        .is_some_and(|route| route != "GR")
                         && update.trip.trip_id.is_none()
                 })
             })
@@ -1197,7 +1260,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn checks_both_current_and_previous_gtfs_service_days() {
         use std::sync::Arc;
@@ -1211,28 +1273,31 @@ mod tests {
             ("overflow", "sunday", 25 * 3600),
             ("wrong-time", "sunday", 26 * 3600),
         ] {
-            gtfs.trips.insert(id.into(), gtfs_structures::Trip {
-                id: id.into(),
-                route_id: "SUNSET".into(),
-                service_id: service.into(),
-                trip_short_name: Some("2".into()),
-                stop_times: vec![gtfs_structures::StopTime {
-                    stop: lax.clone(),
-                    departure_time: Some(seconds),
+            gtfs.trips.insert(
+                id.into(),
+                gtfs_structures::Trip {
+                    id: id.into(),
+                    route_id: "SUNSET".into(),
+                    service_id: service.into(),
+                    trip_short_name: Some("2".into()),
+                    stop_times: vec![gtfs_structures::StopTime {
+                        stop: lax.clone(),
+                        departure_time: Some(seconds),
+                        ..Default::default()
+                    }],
                     ..Default::default()
-                }],
-                ..Default::default()
-            });
+                },
+            );
         }
-        for (service, day) in [
-            ("monday", "2026-11-16"),
-            ("sunday", "2026-11-15"),
-        ] {
-            gtfs.calendar_dates.insert(service.into(), vec![gtfs_structures::CalendarDate {
-                service_id: service.into(),
-                date: day.parse().unwrap(),
-                exception_type: gtfs_structures::Exception::Added,
-            }]);
+        for (service, day) in [("monday", "2026-11-16"), ("sunday", "2026-11-15")] {
+            gtfs.calendar_dates.insert(
+                service.into(),
+                vec![gtfs_structures::CalendarDate {
+                    service_id: service.into(),
+                    date: day.parse().unwrap(),
+                    exception_type: gtfs_structures::Exception::Added,
+                }],
+            );
         }
         let origin = origin_departure("11/15/2026 10:00:00 PM", 'P');
         // Both the same-day 01:00 and previous-day 25:00 represent
@@ -1249,18 +1314,21 @@ mod tests {
         gtfs.trips.remove("overflow");
         gtfs.trips.remove("wrong-time");
         // Now only the current-day trip exists: verify same-day matching.
-        gtfs.trips.insert("current".into(), gtfs_structures::Trip {
-            id: "current".into(),
-            route_id: "SUNSET".into(),
-            service_id: "monday".into(),
-            trip_short_name: Some("2".into()),
-            stop_times: vec![gtfs_structures::StopTime {
-                stop: lax,
-                departure_time: Some(3600),
+        gtfs.trips.insert(
+            "current".into(),
+            gtfs_structures::Trip {
+                id: "current".into(),
+                route_id: "SUNSET".into(),
+                service_id: "monday".into(),
+                trip_short_name: Some("2".into()),
+                stop_times: vec![gtfs_structures::StopTime {
+                    stop: lax,
+                    departure_time: Some(3600),
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
-            ..Default::default()
-        });
+            },
+        );
         assert_eq!(
             match_scheduled_departure(&gtfs, Some("SUNSET"), "2", "LAX", origin),
             Some(("current".into(), jiff::civil::date(2026, 11, 16)))
@@ -1271,33 +1339,40 @@ mod tests {
     fn northeast_regional_hartford_line_matches_by_train_short_name() {
         use std::sync::Arc;
         let mut gtfs = Gtfs::default();
-        gtfs.routes.insert("HARTFORD".into(), gtfs_structures::Route {
-            id: "HARTFORD".into(),
-            long_name: Some("Amtrak Hartford Line".into()),
-            ..Default::default()
-        });
-        gtfs.trips.insert("hartford-scheduled".into(), gtfs_structures::Trip {
-            id: "hartford-scheduled".into(),
-            route_id: "HARTFORD".into(),
-            service_id: "hartford-day".into(),
-            trip_short_name: Some("0475".into()),
-            stop_times: vec![gtfs_structures::StopTime {
-                stop: Arc::new(gtfs_structures::Stop {
-                    id: "NHV".into(),
-                    ..Default::default()
-                }),
-                departure_time: Some(12 * 3600),
+        gtfs.routes.insert(
+            "HARTFORD".into(),
+            gtfs_structures::Route {
+                id: "HARTFORD".into(),
+                long_name: Some("Amtrak Hartford Line".into()),
                 ..Default::default()
-            }],
-            ..Default::default()
-        });
-        gtfs.calendar_dates.insert("hartford-day".into(), vec![
-            gtfs_structures::CalendarDate {
+            },
+        );
+        gtfs.trips.insert(
+            "hartford-scheduled".into(),
+            gtfs_structures::Trip {
+                id: "hartford-scheduled".into(),
+                route_id: "HARTFORD".into(),
+                service_id: "hartford-day".into(),
+                trip_short_name: Some("0475".into()),
+                stop_times: vec![gtfs_structures::StopTime {
+                    stop: Arc::new(gtfs_structures::Stop {
+                        id: "NHV".into(),
+                        ..Default::default()
+                    }),
+                    departure_time: Some(12 * 3600),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        gtfs.calendar_dates.insert(
+            "hartford-day".into(),
+            vec![gtfs_structures::CalendarDate {
                 service_id: "hartford-day".into(),
                 date: "2026-11-16".parse().unwrap(),
                 exception_type: gtfs_structures::Exception::Added,
-            },
-        ]);
+            }],
+        );
         let departure = origin_departure("11/16/2026 12:00:00 PM", 'E');
         assert_eq!(
             match_northeast_regional_branch_departure(&gtfs, "475", "NHV", departure),
@@ -1307,7 +1382,9 @@ mod tests {
                 "HARTFORD".into(),
             ))
         );
-        assert!(match_northeast_regional_branch_departure(&gtfs, "476", "NHV", departure).is_none());
+        assert!(
+            match_northeast_regional_branch_departure(&gtfs, "476", "NHV", departure).is_none()
+        );
     }
 
     #[test]
@@ -1321,10 +1398,14 @@ mod tests {
         assert_eq!(effective_station_tz("VAC", 'M'), 'P');
         assert_eq!(effective_station_tz("NYP", 'E'), 'E');
         let station: AmtrakArrivalJson = serde_json::from_str(
-            r#"{"code":"VAC","tz":"M","bus":false,"schcmnt":"","autoarr":false,"autodep":false}"#
-        ).unwrap();
+            r#"{"code":"VAC","tz":"M","bus":false,"schcmnt":"","autoarr":false,"autodep":false}"#,
+        )
+        .unwrap();
         assert_eq!(
-            time_and_tz_to_unix("11/16/2026 08:25:00", effective_station_tz(&station.code, station.tz)),
+            time_and_tz_to_unix(
+                "11/16/2026 08:25:00",
+                effective_station_tz(&station.code, station.tz)
+            ),
             Some(winter.as_second())
         );
     }
@@ -1333,40 +1414,50 @@ mod tests {
     fn keystone_route_label_falls_back_to_gtfs_trip_short_name() {
         use std::sync::Arc;
         let mut gtfs = Gtfs::default();
-        gtfs.routes.insert("KEYSTONE".into(), gtfs_structures::Route {
-            id: "KEYSTONE".into(),
-            long_name: Some("Keystone Service".into()),
-            ..Default::default()
-        });
-        gtfs.trips.insert("keystone-trip".into(), gtfs_structures::Trip {
-            id: "keystone-trip".into(),
-            route_id: "KEYSTONE".into(),
-            service_id: "keystone-monday".into(),
-            trip_short_name: Some("0647".into()),
-            stop_times: vec![gtfs_structures::StopTime {
-                stop: Arc::new(gtfs_structures::Stop {
-                    id: "NYP".into(),
-                    ..Default::default()
-                }),
-                departure_time: Some(14 * 3600 + 11 * 60),
+        gtfs.routes.insert(
+            "KEYSTONE".into(),
+            gtfs_structures::Route {
+                id: "KEYSTONE".into(),
+                long_name: Some("Keystone Service".into()),
                 ..Default::default()
-            }],
-            ..Default::default()
-        });
-        gtfs.calendar_dates.insert("keystone-monday".into(), vec![
-            gtfs_structures::CalendarDate {
+            },
+        );
+        gtfs.trips.insert(
+            "keystone-trip".into(),
+            gtfs_structures::Trip {
+                id: "keystone-trip".into(),
+                route_id: "KEYSTONE".into(),
+                service_id: "keystone-monday".into(),
+                trip_short_name: Some("0647".into()),
+                stop_times: vec![gtfs_structures::StopTime {
+                    stop: Arc::new(gtfs_structures::Stop {
+                        id: "NYP".into(),
+                        ..Default::default()
+                    }),
+                    departure_time: Some(14 * 3600 + 11 * 60),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        gtfs.calendar_dates.insert(
+            "keystone-monday".into(),
+            vec![gtfs_structures::CalendarDate {
                 service_id: "keystone-monday".into(),
                 date: "2026-11-16".parse().unwrap(),
                 exception_type: gtfs_structures::Exception::Added,
-            },
-        ]);
+            }],
+        );
         let departure = origin_departure("11/16/2026 2:11:00 PM", 'E');
         let matched = match_scheduled_departure(&gtfs, None, "647", "NYP", departure);
         assert_eq!(
             matched,
             Some(("keystone-trip".into(), jiff::civil::date(2026, 11, 16)))
         );
-        assert_eq!(gtfs.trips.get(&matched.unwrap().0).unwrap().route_id, "KEYSTONE");
+        assert_eq!(
+            gtfs.trips.get(&matched.unwrap().0).unwrap().route_id,
+            "KEYSTONE"
+        );
         assert!(match_scheduled_departure(&gtfs, None, "647", "PHL", departure).is_none());
     }
 
@@ -1374,33 +1465,40 @@ mod tests {
     fn northeast_regional_valley_flyer_matches_by_train_short_name() {
         use std::sync::Arc;
         let mut gtfs = Gtfs::default();
-        gtfs.routes.insert("VALLEY".into(), gtfs_structures::Route {
-            id: "VALLEY".into(),
-            long_name: Some("Amtrak Valley Flyer".into()),
-            ..Default::default()
-        });
-        gtfs.trips.insert("valley-scheduled".into(), gtfs_structures::Trip {
-            id: "valley-scheduled".into(),
-            route_id: "VALLEY".into(),
-            service_id: "valley-day".into(),
-            trip_short_name: Some("0486".into()),
-            stop_times: vec![gtfs_structures::StopTime {
-                stop: Arc::new(gtfs_structures::Stop {
-                    id: "NHV".into(),
-                    ..Default::default()
-                }),
-                departure_time: Some(15 * 3600),
+        gtfs.routes.insert(
+            "VALLEY".into(),
+            gtfs_structures::Route {
+                id: "VALLEY".into(),
+                long_name: Some("Amtrak Valley Flyer".into()),
                 ..Default::default()
-            }],
-            ..Default::default()
-        });
-        gtfs.calendar_dates.insert("valley-day".into(), vec![
-            gtfs_structures::CalendarDate {
+            },
+        );
+        gtfs.trips.insert(
+            "valley-scheduled".into(),
+            gtfs_structures::Trip {
+                id: "valley-scheduled".into(),
+                route_id: "VALLEY".into(),
+                service_id: "valley-day".into(),
+                trip_short_name: Some("0486".into()),
+                stop_times: vec![gtfs_structures::StopTime {
+                    stop: Arc::new(gtfs_structures::Stop {
+                        id: "NHV".into(),
+                        ..Default::default()
+                    }),
+                    departure_time: Some(15 * 3600),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        gtfs.calendar_dates.insert(
+            "valley-day".into(),
+            vec![gtfs_structures::CalendarDate {
                 service_id: "valley-day".into(),
                 date: "2026-11-16".parse().unwrap(),
                 exception_type: gtfs_structures::Exception::Added,
-            },
-        ]);
+            }],
+        );
         let departure = origin_departure("11/16/2026 3:00:00 PM", 'E');
         assert_eq!(
             match_northeast_regional_branch_departure(&gtfs, "486", "NHV", departure),
@@ -1410,8 +1508,12 @@ mod tests {
                 "VALLEY".into(),
             ))
         );
-        assert!(match_northeast_regional_branch_departure(&gtfs, "487", "NHV", departure).is_none());
-        assert!(match_northeast_regional_branch_departure(&gtfs, "486", "NYP", departure).is_none());
+        assert!(
+            match_northeast_regional_branch_departure(&gtfs, "487", "NHV", departure).is_none()
+        );
+        assert!(
+            match_northeast_regional_branch_departure(&gtfs, "486", "NYP", departure).is_none()
+        );
     }
 
     #[test]
@@ -1426,19 +1528,25 @@ mod tests {
             departure_time: seconds,
             ..Default::default()
         };
-        gtfs.trips.insert("sunset".into(), gtfs_structures::Trip {
-            id: "sunset".into(),
-            route_id: "SUNSET".into(),
-            service_id: "sunday".into(),
-            trip_short_name: Some("2".into()),
-            stop_times: vec![stop("NONREVENUE", None), stop("LAX", Some(25 * 3600))],
-            ..Default::default()
-        });
-        gtfs.calendar_dates.insert("sunday".into(), vec![gtfs_structures::CalendarDate {
-            service_id: "sunday".into(),
-            date: "2026-11-15".parse().unwrap(),
-            exception_type: gtfs_structures::Exception::Added,
-        }]);
+        gtfs.trips.insert(
+            "sunset".into(),
+            gtfs_structures::Trip {
+                id: "sunset".into(),
+                route_id: "SUNSET".into(),
+                service_id: "sunday".into(),
+                trip_short_name: Some("2".into()),
+                stop_times: vec![stop("NONREVENUE", None), stop("LAX", Some(25 * 3600))],
+                ..Default::default()
+            },
+        );
+        gtfs.calendar_dates.insert(
+            "sunday".into(),
+            vec![gtfs_structures::CalendarDate {
+                service_id: "sunday".into(),
+                date: "2026-11-15".parse().unwrap(),
+                exception_type: gtfs_structures::Exception::Added,
+            }],
+        );
         let origin = origin_departure("11/15/2026 10:00:00 PM", 'P');
         assert_eq!(
             match_scheduled_departure(&gtfs, Some("SUNSET"), "2", "LAX", origin),
@@ -1450,26 +1558,32 @@ mod tests {
     fn sunset_limited_sunday_pacific_departure_uses_gtfs_service_day() {
         use std::sync::Arc;
         let mut gtfs = Gtfs::default();
-        gtfs.trips.insert("sunset-2-sunday".into(), gtfs_structures::Trip {
-            id: "sunset-2-sunday".into(),
-            route_id: "SUNSET".into(),
-            service_id: "sunday".into(),
-            trip_short_name: Some("2".into()),
-            stop_times: vec![gtfs_structures::StopTime {
-                stop: Arc::new(gtfs_structures::Stop {
-                    id: "LAX".into(),
+        gtfs.trips.insert(
+            "sunset-2-sunday".into(),
+            gtfs_structures::Trip {
+                id: "sunset-2-sunday".into(),
+                route_id: "SUNSET".into(),
+                service_id: "sunday".into(),
+                trip_short_name: Some("2".into()),
+                stop_times: vec![gtfs_structures::StopTime {
+                    stop: Arc::new(gtfs_structures::Stop {
+                        id: "LAX".into(),
+                        ..Default::default()
+                    }),
+                    departure_time: Some(25 * 3600),
                     ..Default::default()
-                }),
-                departure_time: Some(25 * 3600),
+                }],
                 ..Default::default()
+            },
+        );
+        gtfs.calendar_dates.insert(
+            "sunday".into(),
+            vec![gtfs_structures::CalendarDate {
+                service_id: "sunday".into(),
+                date: "2026-11-15".parse().unwrap(),
+                exception_type: gtfs_structures::Exception::Added,
             }],
-            ..Default::default()
-        });
-        gtfs.calendar_dates.insert("sunday".into(), vec![gtfs_structures::CalendarDate {
-            service_id: "sunday".into(),
-            date: "2026-11-15".parse().unwrap(),
-            exception_type: gtfs_structures::Exception::Added,
-        }]);
+        );
         let origin = origin_departure("11/15/2026 10:00:00 PM", 'P');
         assert_eq!(
             match_scheduled_departure(&gtfs, Some("SUNSET"), "2", "LAX", origin),
