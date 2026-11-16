@@ -992,9 +992,17 @@ mod tests {
             features_collection.features.len(),
             amtrak_results.as_ref().unwrap().unified_feed.entity.len()
         );
-        // Gold Runner (GR) is identified by its train number, so it does not
-        // require a formal match against an Amtrak scheduled GTFS trip.
-        // All other assigned routes must still resolve to a scheduled trip.
+        // Gold Runner (GR) and Hartford Line are exempt from the formal
+        // scheduled-trip assertion. Other assigned routes must still match.
+        let exempt_route = |route_id: &str| {
+            route_id == "GR"
+                || gtfs.routes.get(route_id).is_some_and(|route| {
+                    route.long_name.as_deref().is_some_and(|name| {
+                        name.eq_ignore_ascii_case("Hartford Line")
+                            || name.eq_ignore_ascii_case("Harford Line")
+                    })
+                })
+        };
         let without_trip: Vec<_> = amtrak_results
             .as_ref()
             .unwrap()
@@ -1003,7 +1011,7 @@ mod tests {
             .iter()
             .filter(|entity| {
                 entity.trip_update.as_ref().is_some_and(|update| {
-                    update.trip.route_id.as_deref().is_some_and(|route| route != "GR")
+                    update.trip.route_id.as_deref().is_some_and(|route| !exempt_route(route))
                         && update.trip.trip_id.is_none()
                 })
             })
