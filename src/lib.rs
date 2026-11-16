@@ -301,10 +301,10 @@ fn match_scheduled_departure(
 ) -> Option<(String, Date)> {
     let eastern = timezone::get("America/New_York");
     let eastern_day = eastern.to_datetime(departure).date();
-    let normalized = |s: &str| {
+    fn normalized(s: &str) -> &str {
         let s = s.trim().trim_start_matches('0');
         if s.is_empty() { "0" } else { s }
-    };
+    }
     // The agency's schedule can encode the origin departure as 25:00 or
     // later, or use an ordinary time on the following service date.
     let mut matches: Vec<(i64, String, Date)> = Vec::new();
