@@ -234,9 +234,11 @@ fn match_scheduled_trip(
 
     fn runs_on(gtfs: &Gtfs, service_id: &str, day: Date) -> bool {
         if let Some(exceptions) = gtfs.calendar_dates.get(service_id) {
-            if let Some(exception) = exceptions.iter().rev().find(|entry| {
-                entry.date.to_string() == day.to_string()
-            }) {
+            if let Some(exception) = exceptions
+                .iter()
+                .rev()
+                .find(|entry| entry.date.to_string() == day.to_string())
+            {
                 return exception.exception_type == gtfs_structures::Exception::Added;
             }
         }
@@ -264,11 +266,18 @@ fn match_scheduled_trip(
     }
 
     let number = normalized(train_number);
-    let mut candidates: Vec<_> = gtfs.trips.values().filter(|trip| {
-        route_id.is_none_or(|route| trip.route_id == route)
-            && (trip.trip_short_name.as_deref().is_some_and(|short| normalized(short) == number)
-                || normalized(&trip.id) == number)
-    }).collect();
+    let mut candidates: Vec<_> = gtfs
+        .trips
+        .values()
+        .filter(|trip| {
+            route_id.is_none_or(|route| trip.route_id == route)
+                && (trip
+                    .trip_short_name
+                    .as_deref()
+                    .is_some_and(|short| normalized(short) == number)
+                    || normalized(&trip.id) == number)
+        })
+        .collect();
 
     // Multiple scheduled variants require an exact Eastern service-date match.
     candidates.retain(|trip| runs_on(gtfs, &trip.service_id, service_date));
@@ -493,13 +502,22 @@ fn feature_to_gtfs_unified(
     // Match the actual GTFS service calendar in Eastern time. Never create
     // synthetic trip IDs or mark a scheduled Amtrak train as ADDED.
     let trip_id = trip_name.as_deref().and_then(|number| {
-        match_scheduled_trip(gtfs, route_id.as_deref(), number, starting_service_date_new_york)
+        match_scheduled_trip(
+            gtfs,
+            route_id.as_deref(),
+            number,
+            starting_service_date_new_york,
+        )
     });
     if trip_id.is_none() {
-        eprintln!(
-            "Unmatched scheduled train {:?}, route {:?}, Eastern service date {}",
-            trip_name, route_id, starting_service_date_new_york
-        );
+        if let Some(route_id) = &route_id {
+            eprintln!(
+                "Unmatched scheduled train {:?}, route {:?}, Eastern service date {}",
+                trip_name,
+                gtfs.routes.get(route_id.as_str()).unwrap().long_name,
+                starting_service_date_new_york
+            );
+        }
     }
 
     let id = match &train_num {
@@ -846,14 +864,23 @@ mod tests {
             amtrak_results.as_ref().unwrap().unified_feed.entity.len()
         );
         // Live integration regression: an assigned route must have a scheduled trip.
-        let without_trip: Vec<_> = amtrak_results.as_ref().unwrap().unified_feed.entity
+        let without_trip: Vec<_> = amtrak_results
+            .as_ref()
+            .unwrap()
+            .unified_feed
+            .entity
             .iter()
-            .filter(|entity| entity.trip_update.as_ref().is_some_and(|update| {
-                update.trip.route_id.is_some() && update.trip.trip_id.is_none()
-            }))
+            .filter(|entity| {
+                entity.trip_update.as_ref().is_some_and(|update| {
+                    update.trip.route_id.is_some() && update.trip.trip_id.is_none()
+                })
+            })
             .map(|entity| entity.id.as_str())
             .collect();
-        assert!(without_trip.is_empty(), "Trains with routes but no trip IDs: {without_trip:?}");
+        assert!(
+            without_trip.is_empty(),
+            "Trains with routes but no trip IDs: {without_trip:?}"
+        );
 
         // println!("{:?}", amtrak_results.unwrap());
     }
@@ -898,25 +925,34 @@ mod tests {
         // Amtrak can report "595" while the GTFS short name is zero-padded.
         let day = jiff::civil::date(2026, 11, 16);
         let mut gtfs = Gtfs::default();
-        gtfs.trips.insert("scheduled-595".into(), gtfs_structures::Trip {
-            id: "scheduled-595".into(),
-            route_id: "PAC_SURF".into(),
-            service_id: "special".into(),
-            trip_short_name: Some("0595".into()),
-            ..Default::default()
-        });
-        gtfs.trips.insert("other-route".into(), gtfs_structures::Trip {
-            id: "other-route".into(),
-            route_id: "OTHER".into(),
-            service_id: "special".into(),
-            trip_short_name: Some("595".into()),
-            ..Default::default()
-        });
-        gtfs.calendar_dates.insert("special".into(), vec![gtfs_structures::CalendarDate {
-            service_id: "special".into(),
-            date: "2026-11-16".parse().unwrap(),
-            exception_type: gtfs_structures::Exception::Added,
-        }]);
+        gtfs.trips.insert(
+            "scheduled-595".into(),
+            gtfs_structures::Trip {
+                id: "scheduled-595".into(),
+                route_id: "PAC_SURF".into(),
+                service_id: "special".into(),
+                trip_short_name: Some("0595".into()),
+                ..Default::default()
+            },
+        );
+        gtfs.trips.insert(
+            "other-route".into(),
+            gtfs_structures::Trip {
+                id: "other-route".into(),
+                route_id: "OTHER".into(),
+                service_id: "special".into(),
+                trip_short_name: Some("595".into()),
+                ..Default::default()
+            },
+        );
+        gtfs.calendar_dates.insert(
+            "special".into(),
+            vec![gtfs_structures::CalendarDate {
+                service_id: "special".into(),
+                date: "2026-11-16".parse().unwrap(),
+                exception_type: gtfs_structures::Exception::Added,
+            }],
+        );
 
         assert_eq!(
             match_scheduled_trip(&gtfs, Some("PAC_SURF"), "595", day),
@@ -927,7 +963,10 @@ mod tests {
             Some("other-route".to_string())
         );
         // A missing schedule is not grounds for inventing a trip_id.
-        assert_eq!(match_scheduled_trip(&gtfs, Some("PAC_SURF"), "999", day), None);
+        assert_eq!(
+            match_scheduled_trip(&gtfs, Some("PAC_SURF"), "999", day),
+            None
+        );
     }
 
     #[test]
@@ -941,29 +980,35 @@ mod tests {
         assert_eq!(eastern_date, jiff::civil::date(2026, 11, 16));
 
         let mut gtfs = Gtfs::default();
-        gtfs.trips.insert("train-595-sun".into(), gtfs_structures::Trip {
-            id: "train-595-sun".into(),
-            route_id: "PAC_SURF".into(),
-            service_id: "sunday".into(),
-            trip_short_name: Some("0595".into()),
-            ..Default::default()
-        });
-        gtfs.trips.insert("train-595-mon".into(), gtfs_structures::Trip {
-            id: "train-595-mon".into(),
-            route_id: "PAC_SURF".into(),
-            service_id: "monday".into(),
-            trip_short_name: Some("595".into()),
-            ..Default::default()
-        });
-        for (service_id, date) in [
-            ("sunday", "2026-11-15"),
-            ("monday", "2026-11-16"),
-        ] {
-            gtfs.calendar_dates.insert(service_id.into(), vec![gtfs_structures::CalendarDate {
-                service_id: service_id.into(),
-                date: date.parse().unwrap(),
-                exception_type: gtfs_structures::Exception::Added,
-            }]);
+        gtfs.trips.insert(
+            "train-595-sun".into(),
+            gtfs_structures::Trip {
+                id: "train-595-sun".into(),
+                route_id: "PAC_SURF".into(),
+                service_id: "sunday".into(),
+                trip_short_name: Some("0595".into()),
+                ..Default::default()
+            },
+        );
+        gtfs.trips.insert(
+            "train-595-mon".into(),
+            gtfs_structures::Trip {
+                id: "train-595-mon".into(),
+                route_id: "PAC_SURF".into(),
+                service_id: "monday".into(),
+                trip_short_name: Some("595".into()),
+                ..Default::default()
+            },
+        );
+        for (service_id, date) in [("sunday", "2026-11-15"), ("monday", "2026-11-16")] {
+            gtfs.calendar_dates.insert(
+                service_id.into(),
+                vec![gtfs_structures::CalendarDate {
+                    service_id: service_id.into(),
+                    date: date.parse().unwrap(),
+                    exception_type: gtfs_structures::Exception::Added,
+                }],
+            );
         }
 
         assert_eq!(
@@ -982,18 +1027,24 @@ mod tests {
     fn removed_service_does_not_get_a_trip_id() {
         let day = jiff::civil::date(2026, 11, 16);
         let mut gtfs = Gtfs::default();
-        gtfs.trips.insert("removed".into(), gtfs_structures::Trip {
-            id: "removed".into(),
-            route_id: "R".into(),
-            service_id: "canceled".into(),
-            trip_short_name: Some("123".into()),
-            ..Default::default()
-        });
-        gtfs.calendar_dates.insert("canceled".into(), vec![gtfs_structures::CalendarDate {
-            service_id: "canceled".into(),
-            date: "2026-11-16".parse().unwrap(),
-            exception_type: gtfs_structures::Exception::Deleted,
-        }]);
+        gtfs.trips.insert(
+            "removed".into(),
+            gtfs_structures::Trip {
+                id: "removed".into(),
+                route_id: "R".into(),
+                service_id: "canceled".into(),
+                trip_short_name: Some("123".into()),
+                ..Default::default()
+            },
+        );
+        gtfs.calendar_dates.insert(
+            "canceled".into(),
+            vec![gtfs_structures::CalendarDate {
+                service_id: "canceled".into(),
+                date: "2026-11-16".parse().unwrap(),
+                exception_type: gtfs_structures::Exception::Deleted,
+            }],
+        );
         assert!(match_scheduled_trip(&gtfs, Some("R"), "123", day).is_none());
     }
 
