@@ -1,19 +1,11 @@
 # Jiff and timezone data
 
-Date/time handling now uses native Jiff types. Named timezone conversions use
-an explicit package-local TZif bundle generated from IANA 2026f, including in
-crates.io packages. This avoids depending on the host zoneinfo version or waiting
-for the published jiff-tzdb crate (0.1.9 currently bundles 2026e) to catch up.
-
-`python3 tools/update-tzdata.py 2026f` regenerates the selected zones. It builds
-zic from the matching IANA code release, compiles Unix/POSIX timestamps without
-leap-second corrections, and records both source archive SHA-256 hashes.
-IANA tzdata is public domain; see https://data.iana.org/time-zones/tzdb/LICENSE.
-
-Daily CI checks the latest IANA release and opens update PRs. Stale data fails
-the freshness check. GitHub Actions needs permission to create PRs. Changes
-require merge, a new crate release, and consumer rebuild/deployment; a running
-binary cannot update its packaged data automatically.
+Date/time handling uses native Jiff types. Named timezone conversions explicitly
+use Jiff's bundled IANA database, independent of the host zoneinfo. CI checks the
+resolved `jiff-tzdb` crate's bundled release against IANA. After an IANA update,
+use the corresponding `jiff-tzdb` release and rebuild consumers to load the new
+data. The older generated TZif files under `src/tzdata` are no longer read at
+runtime.
 
 Chrono may remain in transitive GTFS dependencies, but is no longer a direct
 dependency or used in application source. Values belonging to GTFS structures

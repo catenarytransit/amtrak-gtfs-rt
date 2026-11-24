@@ -14,7 +14,7 @@ non_ascii_idents = "deny"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-jiff = { version = "1.0.0", default-features = false, features = ["std", "serde", "tzdb-bundle-always"] }
+jiff = { version = "1.0.3", default-features = false, features = ["std", "serde", "tzdb-bundle-always"] }
 amtk = "0.1.0"
 base64 = "0.22"
 futures = "0.3"
@@ -29,6 +29,7 @@ reqwest = { version = "0.13", features = [
     "rustls",
     "deflate",
     "cookies",
+    "json",
 ] }
 rust-crypto = "0.2"
 serde = "1.0"
@@ -36,4 +37,5 @@ serde_json = "1.0 "
 scraper = "0.22"
 
 [dev-dependencies]
+jiff-tzdb = "1.0.0"
 tokio = { version = "1.48", features = ["full"] }

@@ -35,6 +35,10 @@
 //! Thus, we've included a function `filter_capital_corridor()` which takes in any `FeedMessage` and removes CC vehicles and trips.
 
 use asm::asm_alert_to_gtfs_rt;
+#[cfg(test)]
+mod cascades_tests;
+mod metrolink;
+mod radar;
 mod timezone;
 use geojson::FeatureCollection;
 use gtfs_realtime::FeedEntity;
@@ -159,6 +163,12 @@ pub struct AmtrakArrivalJson {
     estdepcmnt: Option<String>,
 }
 
+impl AmtrakArrivalJson {
+    fn timestamp(&self, text: &str) -> Option<i64> {
+        time_and_tz_to_unix(text, &station_timezone(&self.code, self.tz))
+    }
+}
+
 fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakArrivalJson> {
     let mut amtrak_arrival_jsons = vec![];
 
@@ -172,9 +182,7 @@ fn feature_to_amtrak_arrival_structs(feature: &geojson::Feature) -> Vec<AmtrakAr
                     serde_json::from_str(station_text);
 
                 if amtrak_arrival.is_ok() {
-                    let mut arrival = amtrak_arrival.unwrap();
-                    arrival.tz = effective_station_tz(&arrival.code, arrival.tz);
-                    amtrak_arrival_jsons.push(arrival);
+                    amtrak_arrival_jsons.push(amtrak_arrival.unwrap());
                 } else {
                     println!(
                         "Error parsing amtrak arrival json, {}\n{}",
@@ -490,6 +498,7 @@ fn feature_to_gtfs_unified(
     gtfs: &Gtfs,
     feature: &geojson::Feature,
     asm_lookup_table: Option<&HashMap<(Date, String), Vec<asm::AsmAlert>>>,
+    radar_locations: &radar::Locations,
 ) -> FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
@@ -507,8 +516,6 @@ fn feature_to_gtfs_unified(
     );
 
     let point = point.unwrap();
-
-    let speed: Option<f32> = get_speed(feature);
 
     //unix time seconds
     let timestamp: Option<u64> = match feature.properties.as_ref().unwrap().get("updated_at") {
@@ -559,14 +566,14 @@ fn feature_to_gtfs_unified(
             arrival: match &feature.postarr {
                 Some(postarr) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
-                    time: time_and_tz_to_unix(postarr, feature.tz),
+                    time: feature.timestamp(postarr),
                     uncertainty: None,
                     scheduled_time: None,
                 }),
                 None => match &feature.estarr {
                     Some(estarr) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                         delay: None,
-                        time: time_and_tz_to_unix(estarr, feature.tz),
+                        time: feature.timestamp(estarr),
                         uncertainty: None,
                         scheduled_time: None,
                     }),
@@ -579,8 +586,8 @@ fn feature_to_gtfs_unified(
                                 match previous {
                                     Some(previous) => {
                                         let previous_departure_time = match &previous.postdep {
-                                            Some(postdep) => Some(time_and_tz_to_unix(postdep, feature.tz)),
-                                            None => previous.estdep.as_ref().map(|estdep| time_and_tz_to_unix(estdep, feature.tz)),
+                                            Some(postdep) => Some(previous.timestamp(postdep)),
+                                            None => previous.estdep.as_ref().map(|estdep| previous.timestamp(estdep)),
                                         };
 
                                         match previous_departure_time {
@@ -588,7 +595,7 @@ fn feature_to_gtfs_unified(
                                             Some(previous_departure_time) => {
                                                 match &previous.schdep {
                                                     Some(previous_schdep) => {
-                                                        let prev_sch_dep = time_and_tz_to_unix(previous_schdep, feature.tz);
+                                                        let prev_sch_dep = previous.timestamp(previous_schdep);
                                                         let delay = match (previous_departure_time,prev_sch_dep) {
                                                             (Some(a), Some(b)) => Some(a - b),
                                                             _ => None
@@ -598,7 +605,7 @@ fn feature_to_gtfs_unified(
                                                             Some( delay) => {
                                                                 match &feature.scharr {
                                                                     Some(scharr) => {
-                                                                        let arrival_time = time_and_tz_to_unix(scharr, feature.tz);
+                                                                        let arrival_time = feature.timestamp(scharr);
 
                                                                         match arrival_time {
                                                                             Some(arrival_time) => {
@@ -635,13 +642,13 @@ fn feature_to_gtfs_unified(
             departure: match &feature.postdep {
                 Some(postdep) => Some(gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
-                    time: time_and_tz_to_unix(postdep, feature.tz),
+                    time: feature.timestamp(postdep),
                     uncertainty: None,
                     scheduled_time: None,
                 }),
                 None => feature.estdep.as_ref().map(|estdep| gtfs_realtime::trip_update::StopTimeEvent {
                     delay: None,
-                    time: time_and_tz_to_unix(estdep, feature.tz),
+                    time: feature.timestamp(estdep),
                     uncertainty: None,
                     scheduled_time: None,
                 })},
@@ -660,9 +667,8 @@ fn feature_to_gtfs_unified(
         .and_then(|properties| properties.get("OrigCode"))
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    let origin_tz = effective_station_tz(origin_stop_code, origin_tz);
-    let origin_timestamp =
-        origin_departure_at_station(&origin_time_string, origin_tz, origin_stop_code);
+    let origin_tz = station_timezone(origin_stop_code, origin_tz);
+    let origin_timestamp = origin_departure_in_zone(&origin_time_string, &origin_tz);
 
     let mut starting_service_date_new_york = timezone::get("America/New_York")
         .to_datetime(origin_timestamp)
@@ -677,7 +683,7 @@ fn feature_to_gtfs_unified(
     }
 
     // ASM alert dates and service weekdays use the train's origin-local date.
-    let origin_local_time = tz_char_to_tz(origin_tz).to_datetime(origin_timestamp);
+    let origin_local_time = origin_tz.to_datetime(origin_timestamp);
 
     let route_name: Option<String> = match feature.properties.as_ref().unwrap().get("RouteName") {
         Some(a) => match a {
@@ -799,7 +805,37 @@ fn feature_to_gtfs_unified(
         None => None,
     };
 
-    let bearing: Option<f32> = get_bearing(feature);
+    let amtrak_position = gtfs_realtime::Position {
+        speed: get_speed(feature),
+        odometer: None,
+        bearing: get_bearing(feature),
+        latitude: point[1] as f32,
+        longitude: point[0] as f32,
+    };
+    let (position, vehicle_timestamp) = train_num
+        .as_deref()
+        .and_then(|number| {
+            radar_locations
+                .position(starting_service_date_new_york, number)
+                .or_else(|| {
+                    // Metrolink reports Pacific observation times, not Eastern
+                    // GTFS service dates. Apply the same origin-date correction
+                    // as above in the origin's local timezone.
+                    let corrected_origin = timezone::latest_timestamp(
+                        &origin_tz,
+                        origin_local_time + (date_offset as i64).days(),
+                    )?;
+                    radar_locations.metrolink_position(
+                        number,
+                        corrected_origin,
+                        route_name.as_deref(),
+                        timestamp,
+                        &amtrak_position,
+                    )
+                })
+        })
+        .map(|(position, timestamp)| (position, Some(timestamp)))
+        .unwrap_or((amtrak_position, timestamp));
 
     let trip_desc = gtfs_realtime::TripDescriptor {
         trip_id: trip_id.clone(),
@@ -851,7 +887,7 @@ fn feature_to_gtfs_unified(
         vehicle: Some(gtfs_realtime::VehiclePosition {
             stop_id: None,
             current_status: None,
-            timestamp,
+            timestamp: vehicle_timestamp,
             congestion_level: None,
             occupancy_status: None,
             occupancy_percentage: None,
@@ -859,13 +895,7 @@ fn feature_to_gtfs_unified(
             current_stop_sequence: None,
             vehicle: None,
             trip: Some(trip_desc.clone()),
-            position: Some(gtfs_realtime::Position {
-                speed,
-                odometer: None,
-                bearing,
-                latitude: point[1] as f32,
-                longitude: point[0] as f32,
-            }),
+            position: Some(position),
         }),
     }
 }
@@ -884,15 +914,13 @@ pub fn make_gtfs_header() -> gtfs_realtime::FeedHeader {
     }
 }
 
-// Amtrak occasionally labels Vancouver, BC (VAC) as Mountain time even
-// though the station observes Pacific time. Prefer the station's actual
-// timezone over the unreliable one-letter feed field.
-fn effective_station_tz(code: &str, reported_tz: char) -> char {
-    if code == "VAC" { 'P' } else { reported_tz }
-}
-
-fn origin_departure_at_station(timestamp_text: &str, tz: char, origin_code: &str) -> Timestamp {
-    origin_departure(timestamp_text, effective_station_tz(origin_code, tz))
+// The station code distinguishes Vancouver, BC from Vancouver, WA.
+fn station_timezone(code: &str, reported_tz: char) -> jiff::tz::TimeZone {
+    if code == "VAC" {
+        timezone::get("America/Vancouver")
+    } else {
+        tz_char_to_tz(reported_tz)
+    }
 }
 
 fn tz_char_to_tz(tz: char) -> jiff::tz::TimeZone {
@@ -906,9 +934,9 @@ fn tz_char_to_tz(tz: char) -> jiff::tz::TimeZone {
 }
 
 // Select the later instant during a fold, and reject nonexistent local times.
-fn time_and_tz_to_unix(timestamp_text: &str, tz: char) -> Option<i64> {
+fn time_and_tz_to_unix(timestamp_text: &str, tz: &jiff::tz::TimeZone) -> Option<i64> {
     let dt = DateTime::strptime("%m/%d/%Y %H:%M:%S", timestamp_text).ok()?;
-    timezone::latest_timestamp(&tz_char_to_tz(tz), dt).map(|ts| ts.as_second())
+    timezone::latest_timestamp(tz, dt).map(|ts| ts.as_second())
 }
 
 /// Detects if the starting date is off by approximately 24 hours by analyzing delays.
@@ -923,37 +951,17 @@ fn detect_date_offset_from_delay(features_list: &[AmtrakArrivalJson]) -> i32 {
         let scheduled_time = feature
             .scharr
             .as_ref()
-            .and_then(|t| time_and_tz_to_unix(t, feature.tz))
-            .or_else(|| {
-                feature
-                    .schdep
-                    .as_ref()
-                    .and_then(|t| time_and_tz_to_unix(t, feature.tz))
-            });
+            .and_then(|t| feature.timestamp(t))
+            .or_else(|| feature.schdep.as_ref().and_then(|t| feature.timestamp(t)));
 
         // Get realtime/actual time (prefer actual, fall back to estimated)
         let realtime_time = feature
             .postarr
             .as_ref()
-            .and_then(|t| time_and_tz_to_unix(t, feature.tz))
-            .or_else(|| {
-                feature
-                    .postdep
-                    .as_ref()
-                    .and_then(|t| time_and_tz_to_unix(t, feature.tz))
-            })
-            .or_else(|| {
-                feature
-                    .estarr
-                    .as_ref()
-                    .and_then(|t| time_and_tz_to_unix(t, feature.tz))
-            })
-            .or_else(|| {
-                feature
-                    .estdep
-                    .as_ref()
-                    .and_then(|t| time_and_tz_to_unix(t, feature.tz))
-            });
+            .and_then(|t| feature.timestamp(t))
+            .or_else(|| feature.postdep.as_ref().and_then(|t| feature.timestamp(t)))
+            .or_else(|| feature.estarr.as_ref().and_then(|t| feature.timestamp(t)))
+            .or_else(|| feature.estdep.as_ref().and_then(|t| feature.timestamp(t)));
 
         if let (Some(sched), Some(rt)) = (scheduled_time, realtime_time) {
             let delay = rt - sched;
@@ -977,9 +985,12 @@ fn detect_date_offset_from_delay(features_list: &[AmtrakArrivalJson]) -> i32 {
 
 //for origin departure conversion to local time representation
 pub fn origin_departure(timestamp_text: &str, tz: char) -> Timestamp {
+    origin_departure_in_zone(timestamp_text, &tz_char_to_tz(tz))
+}
+
+fn origin_departure_in_zone(timestamp_text: &str, tz: &jiff::tz::TimeZone) -> Timestamp {
     let dt = DateTime::strptime("%m/%d/%Y %l:%M:%S %p", timestamp_text).unwrap();
-    let tz = tz_char_to_tz(tz);
-    timezone::latest_timestamp(&tz, dt).expect("valid origin departure")
+    timezone::latest_timestamp(tz, dt).expect("valid origin departure")
 }
 
 // Time is formatted 11/18/2023 4:58:09 PM.
@@ -1041,15 +1052,13 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
     gtfs: &Gtfs,
     client: &reqwest::Client,
 ) -> Result<GtfsAmtrakResultsJoined, Box<dyn std::error::Error + Sync + Send>> {
-    let raw_data = client
-        .get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData")
-        .send()
-        .await;
-
-    let raw_asm_data = client
-        .get("https://asm-backend.transitdocs.com/map")
-        .send()
-        .await;
+    let (raw_data, raw_asm_data, radar_locations) = futures::join!(
+        client
+            .get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData")
+            .send(),
+        client.get("https://asm-backend.transitdocs.com/map").send(),
+        radar::fetch(client),
+    );
 
     match raw_data {
         Ok(raw_data) => {
@@ -1094,7 +1103,12 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
                         .features
                         .iter()
                         .map(|feature: &geojson::Feature| {
-                            feature_to_gtfs_unified(&gtfs, feature, lookup_table.as_ref())
+                            feature_to_gtfs_unified(
+                                gtfs,
+                                feature,
+                                lookup_table.as_ref(),
+                                &radar_locations,
+                            )
                         })
                         .collect::<Vec<FeedEntity>>(),
                     header: make_gtfs_header(),
@@ -1129,30 +1143,12 @@ mod tests {
 
         println!("amtrak download finished");
 
-        let amtrak_results = fetch_amtrak_gtfs_rt_joined(&gtfs, &client).await;
+        let amtrak_results = fetch_amtrak_gtfs_rt_joined(&gtfs, &client).await.unwrap();
+        assert!(!amtrak_results.unified_feed.entity.is_empty());
 
-        assert!(amtrak_results.is_ok());
-
-        let raw_data = client
-            .get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData")
-            .send()
-            .await
-            .unwrap();
-
-        let decrypted_string = amtk::decrypt(raw_data.text().await.unwrap().as_str()).unwrap();
-
-        let geojson: geojson::GeoJson = decrypted_string.parse::<geojson::GeoJson>().unwrap();
-        let features_collection: FeatureCollection = FeatureCollection::try_from(geojson).unwrap();
-
-        assert_eq!(
-            features_collection.features.len(),
-            amtrak_results.as_ref().unwrap().unified_feed.entity.len()
-        );
         // Only Gold Runner uses train-number identity without a formal GTFS
         // schedule match; Hartford Line must match its scheduled trip.
         let without_trip: Vec<_> = amtrak_results
-            .as_ref()
-            .unwrap()
             .unified_feed
             .entity
             .iter()
@@ -1384,29 +1380,6 @@ mod tests {
         );
         assert!(
             match_northeast_regional_branch_departure(&gtfs, "476", "NHV", departure).is_none()
-        );
-    }
-
-    #[test]
-    fn cascades_vancouver_bc_origin_uses_pacific_time_in_winter_and_summer() {
-        // Amtrak realtime marks VAC as M, but Vancouver, BC follows Pacific
-        // time. November 16 is PST (UTC-8), while July 16 is PDT (UTC-7).
-        let winter = origin_departure_at_station("11/16/2026 8:25:00 AM", 'M', "VAC");
-        let summer = origin_departure_at_station("7/16/2026 8:25:00 AM", 'M', "VAC");
-        assert_eq!(winter.to_string(), "2026-11-16T16:25:00Z");
-        assert_eq!(summer.to_string(), "2026-07-16T15:25:00Z");
-        assert_eq!(effective_station_tz("VAC", 'M'), 'P');
-        assert_eq!(effective_station_tz("NYP", 'E'), 'E');
-        let station: AmtrakArrivalJson = serde_json::from_str(
-            r#"{"code":"VAC","tz":"M","bus":false,"schcmnt":"","autoarr":false,"autodep":false}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            time_and_tz_to_unix(
-                "11/16/2026 08:25:00",
-                effective_station_tz(&station.code, station.tz)
-            ),
-            Some(winter.as_second())
         );
     }
 
@@ -1770,11 +1743,11 @@ mod jiff_regressions {
             Some(expected)
         );
         assert_eq!(
-            time_and_tz_to_unix("11/01/2026 01:30:00", 'E'),
+            time_and_tz_to_unix("11/01/2026 01:30:00", &tz_char_to_tz('E')),
             Some(expected)
         );
         assert!(process_timestamp_text("03/08/2026 2:30:00 AM").is_none());
-        assert!(time_and_tz_to_unix("03/08/2026 02:30:00", 'E').is_none());
+        assert!(time_and_tz_to_unix("03/08/2026 02:30:00", &tz_char_to_tz('E')).is_none());
         assert!(process_timestamp_text("invalid").is_none());
     }
     #[test]
@@ -1787,8 +1760,8 @@ mod jiff_regressions {
                 .to_string(),
             "20250808"
         );
-        let mountain = time_and_tz_to_unix("07/01/2026 12:00:00", 'M').unwrap();
-        let arizona = time_and_tz_to_unix("07/01/2026 12:00:00", 'A').unwrap();
+        let mountain = time_and_tz_to_unix("07/01/2026 12:00:00", &tz_char_to_tz('M')).unwrap();
+        let arizona = time_and_tz_to_unix("07/01/2026 12:00:00", &tz_char_to_tz('A')).unwrap();
         assert_eq!(arizona - mountain, 3600);
     }
 }
