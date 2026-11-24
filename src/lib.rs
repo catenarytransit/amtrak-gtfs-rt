@@ -35,6 +35,7 @@
 //! Thus, we've included a function `filter_capital_corridor()` which takes in any `FeedMessage` and removes CC vehicles and trips.
 
 use asm::asm_alert_to_gtfs_rt;
+mod radar;
 mod timezone;
 use geojson::FeatureCollection;
 use gtfs_realtime::FeedEntity;
@@ -490,6 +491,7 @@ fn feature_to_gtfs_unified(
     gtfs: &Gtfs,
     feature: &geojson::Feature,
     asm_lookup_table: Option<&HashMap<(Date, String), Vec<asm::AsmAlert>>>,
+    radar_locations: &radar::Locations,
 ) -> FeedEntity {
     let geometry = feature.geometry.as_ref().unwrap();
     let point: Option<geojson::PointType> = match geometry.value.clone() {
@@ -507,8 +509,6 @@ fn feature_to_gtfs_unified(
     );
 
     let point = point.unwrap();
-
-    let speed: Option<f32> = get_speed(feature);
 
     //unix time seconds
     let timestamp: Option<u64> = match feature.properties.as_ref().unwrap().get("updated_at") {
@@ -799,7 +799,22 @@ fn feature_to_gtfs_unified(
         None => None,
     };
 
-    let bearing: Option<f32> = get_bearing(feature);
+    let (position, vehicle_timestamp) = train_num
+        .as_deref()
+        .and_then(|number| radar_locations.position(starting_service_date_new_york, number))
+        .map(|(position, timestamp)| (position, Some(timestamp)))
+        .unwrap_or_else(|| {
+            (
+                gtfs_realtime::Position {
+                    speed: get_speed(feature),
+                    odometer: None,
+                    bearing: get_bearing(feature),
+                    latitude: point[1] as f32,
+                    longitude: point[0] as f32,
+                },
+                timestamp,
+            )
+        });
 
     let trip_desc = gtfs_realtime::TripDescriptor {
         trip_id: trip_id.clone(),
@@ -851,7 +866,7 @@ fn feature_to_gtfs_unified(
         vehicle: Some(gtfs_realtime::VehiclePosition {
             stop_id: None,
             current_status: None,
-            timestamp,
+            timestamp: vehicle_timestamp,
             congestion_level: None,
             occupancy_status: None,
             occupancy_percentage: None,
@@ -859,13 +874,7 @@ fn feature_to_gtfs_unified(
             current_stop_sequence: None,
             vehicle: None,
             trip: Some(trip_desc.clone()),
-            position: Some(gtfs_realtime::Position {
-                speed,
-                odometer: None,
-                bearing,
-                latitude: point[1] as f32,
-                longitude: point[0] as f32,
-            }),
+            position: Some(position),
         }),
     }
 }
@@ -1041,15 +1050,13 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
     gtfs: &Gtfs,
     client: &reqwest::Client,
 ) -> Result<GtfsAmtrakResultsJoined, Box<dyn std::error::Error + Sync + Send>> {
-    let raw_data = client
-        .get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData")
-        .send()
-        .await;
-
-    let raw_asm_data = client
-        .get("https://asm-backend.transitdocs.com/map")
-        .send()
-        .await;
+    let (raw_data, raw_asm_data, radar_locations) = futures::join!(
+        client
+            .get("https://maps.amtrak.com/services/MapDataService/trains/getTrainsData")
+            .send(),
+        client.get("https://asm-backend.transitdocs.com/map").send(),
+        radar::fetch(client),
+    );
 
     match raw_data {
         Ok(raw_data) => {
@@ -1094,7 +1101,12 @@ pub async fn fetch_amtrak_gtfs_rt_joined(
                         .features
                         .iter()
                         .map(|feature: &geojson::Feature| {
-                            feature_to_gtfs_unified(&gtfs, feature, lookup_table.as_ref())
+                            feature_to_gtfs_unified(
+                                gtfs,
+                                feature,
+                                lookup_table.as_ref(),
+                                &radar_locations,
+                            )
                         })
                         .collect::<Vec<FeedEntity>>(),
                     header: make_gtfs_header(),

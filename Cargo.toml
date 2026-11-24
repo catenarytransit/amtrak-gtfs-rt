@@ -29,6 +29,7 @@ reqwest = { version = "0.13", features = [
     "rustls",
     "deflate",
     "cookies",
+    "json",
 ] }
 rust-crypto = "0.2"
 serde = "1.0"
