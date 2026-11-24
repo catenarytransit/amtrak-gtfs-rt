@@ -98,7 +98,9 @@ impl Locations {
     }
 
     pub(crate) fn position(&self, run_date: Date, train_number: &str) -> Option<(Position, u64)> {
-        self.mta.get(&(run_date, train_number.parse().ok()?)).copied()
+        self.mta
+            .get(&(run_date, train_number.parse().ok()?))
+            .copied()
     }
 
     pub(crate) fn with_metrolink(mut self, metrolink: crate::metrolink::Locations) -> Self {
@@ -114,7 +116,13 @@ impl Locations {
         amtrak_timestamp: Option<u64>,
         amtrak_position: &Position,
     ) -> Option<(Position, u64)> {
-        self.metrolink.position(train_number, origin, route_name, amtrak_timestamp, amtrak_position)
+        self.metrolink.position(
+            train_number,
+            origin,
+            route_name,
+            amtrak_timestamp,
+            amtrak_position,
+        )
     }
 }
 

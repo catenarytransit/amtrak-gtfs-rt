@@ -33,9 +33,7 @@ pub(crate) struct Locations(HashMap<u32, (Position, u64)>);
 // Never extract digits from ordinary Metrolink commuter or freight symbols.
 fn amtrak_train_number(symbol: &str) -> Option<u32> {
     let number = symbol.trim().strip_prefix('A')?;
-    let number = number
-        .strip_suffix(['N', 'S', 'E', 'W'])
-        .unwrap_or(number);
+    let number = number.strip_suffix(['N', 'S', 'E', 'W']).unwrap_or(number);
     if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
@@ -49,9 +47,7 @@ fn decimal_degrees(text: &str, maximum: f64) -> Option<f32> {
     let degrees: i32 = degrees_text.parse().ok()?;
     let minutes: f64 = parts.next()?.parse().ok()?;
     let seconds: f64 = parts.next()?.parse().ok()?;
-    if parts.next().is_some()
-        || !(0.0..60.0).contains(&minutes)
-        || !(0.0..60.0).contains(&seconds)
+    if parts.next().is_some() || !(0.0..60.0).contains(&minutes) || !(0.0..60.0).contains(&seconds)
     {
         return None;
     }
@@ -145,7 +141,9 @@ impl Locations {
                 longitude,
                 bearing: train.direction.as_deref().and_then(bearing),
                 odometer: None,
-                speed: train.speed.as_deref()
+                speed: train
+                    .speed
+                    .as_deref()
                     .and_then(|speed| speed.trim().parse::<f32>().ok())
                     .filter(|speed| speed.is_finite() && *speed >= 0.0)
                     .map(|mph| mph * MPS_PER_MPH),
@@ -167,7 +165,9 @@ impl Locations {
         amtrak_position: &Position,
     ) -> Option<(Position, u64)> {
         let (position, observed) = self.0.get(&train_number.parse().ok()?).copied()?;
-        let elapsed = i64::try_from(observed).ok()?.checked_sub(origin.as_second())?;
+        let elapsed = i64::try_from(observed)
+            .ok()?
+            .checked_sub(origin.as_second())?;
         // The list has no service date. Reject observations before this run
         // (allow a train to be staged up to two hours before departure).
         if elapsed < -MAX_PREDEPARTURE_SECONDS
@@ -206,7 +206,9 @@ pub(crate) async fn fetch(client: &reqwest::Client) -> Locations {
     match result {
         Ok(rows) => Locations::from_rows(rows, Timestamp::now().as_second() as u64),
         Err(error) => {
-            eprintln!("Error fetching Metrolink PTC positions, skipping Metrolink overrides: {error}");
+            eprintln!(
+                "Error fetching Metrolink PTC positions, skipping Metrolink overrides: {error}"
+            );
             Locations::default()
         }
     }
@@ -266,10 +268,14 @@ mod tests {
                 "Heading": "SW",
                 "updated_at": "11/24/2026 6:50:10 PM"
             }
-        })).unwrap();
+        }))
+        .unwrap();
         let gtfs = gtfs_structures::Gtfs::default();
         let baseline = crate::feature_to_gtfs_unified(
-            &gtfs, &feature, None, &crate::radar::Locations::default(),
+            &gtfs,
+            &feature,
+            None,
+            &crate::radar::Locations::default(),
         );
         let actual = crate::feature_to_gtfs_unified(&gtfs, &feature, None, &sources);
         assert_eq!(actual.id, baseline.id);
@@ -327,10 +333,16 @@ mod tests {
     #[test]
     fn timezone_handles_pacific_summer_and_both_fall_back_occurrences() {
         let summer = unix("2026-07-01T22:50:01Z");
-        assert_eq!(observation_timestamp("7/1/2026 3:50:01 PM", summer), Some(summer));
+        assert_eq!(
+            observation_timestamp("7/1/2026 3:50:01 PM", summer),
+            Some(summer)
+        );
         for instant in ["2026-11-01T08:30:00Z", "2026-11-01T09:30:00Z"] {
             let now = unix(instant);
-            assert_eq!(observation_timestamp("11/1/2026 1:30:00 AM", now), Some(now));
+            assert_eq!(
+                observation_timestamp("11/1/2026 1:30:00 AM", now),
+                Some(now)
+            );
         }
         assert_eq!(
             observation_timestamp("3/8/2026 2:30:00 AM", unix("2026-03-08T10:30:00Z")),
@@ -346,14 +358,38 @@ mod tests {
         let locations = Locations::from_rows(vec![evening], observed);
         let near = amtrak_position();
         let route = Some("Pacific Surfliner");
-        assert!(locations.position("0579", origin(), route, None, &near).is_some());
-        assert!(locations.position("580", origin(), route, None, &near).is_none());
+        assert!(
+            locations
+                .position("0579", origin(), route, None, &near)
+                .is_some()
+        );
+        assert!(
+            locations
+                .position("580", origin(), route, None, &near)
+                .is_none()
+        );
         let previous_day = "2026-11-23T21:00:00Z".parse().unwrap();
-        assert!(locations.position("579", previous_day, route, Some(observed), &near).is_none());
+        assert!(
+            locations
+                .position("579", previous_day, route, Some(observed), &near)
+                .is_none()
+        );
         let tomorrow = "2026-11-25T21:00:00Z".parse().unwrap();
-        assert!(locations.position("579", tomorrow, route, None, &near).is_none());
-        let far = Position { latitude: 40.0, longitude: -73.0, ..near };
-        assert!(locations.position("579", origin(), route, None, &far).is_none());
+        assert!(
+            locations
+                .position("579", tomorrow, route, None, &near)
+                .is_none()
+        );
+        let far = Position {
+            latitude: 40.0,
+            longitude: -73.0,
+            ..near
+        };
+        assert!(
+            locations
+                .position("579", origin(), route, None, &far)
+                .is_none()
+        );
     }
 
     #[test]
@@ -363,8 +399,20 @@ mod tests {
         let previous_day = "2026-11-23T21:00:00Z".parse().unwrap();
         let near = amtrak_position();
         let route = Some("Southwest Chief");
-        assert!(locations.position("579", previous_day, route, Some(observed), &near).is_some());
-        assert!(locations.position("579", previous_day, route, Some(observed - 1801), &near).is_none());
-        assert!(locations.position("579", previous_day, route, None, &near).is_none());
+        assert!(
+            locations
+                .position("579", previous_day, route, Some(observed), &near)
+                .is_some()
+        );
+        assert!(
+            locations
+                .position("579", previous_day, route, Some(observed - 1801), &near)
+                .is_none()
+        );
+        assert!(
+            locations
+                .position("579", previous_day, route, None, &near)
+                .is_none()
+        );
     }
 }
