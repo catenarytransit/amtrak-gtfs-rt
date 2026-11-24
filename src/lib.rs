@@ -37,6 +37,7 @@
 use asm::asm_alert_to_gtfs_rt;
 #[cfg(test)]
 mod cascades_tests;
+mod metrolink;
 mod radar;
 mod timezone;
 use geojson::FeatureCollection;
@@ -804,22 +805,37 @@ fn feature_to_gtfs_unified(
         None => None,
     };
 
+    let amtrak_position = gtfs_realtime::Position {
+        speed: get_speed(feature),
+        odometer: None,
+        bearing: get_bearing(feature),
+        latitude: point[1] as f32,
+        longitude: point[0] as f32,
+    };
     let (position, vehicle_timestamp) = train_num
         .as_deref()
-        .and_then(|number| radar_locations.position(starting_service_date_new_york, number))
+        .and_then(|number| {
+            radar_locations
+                .position(starting_service_date_new_york, number)
+                .or_else(|| {
+                    // Metrolink reports Pacific observation times, not Eastern
+                    // GTFS service dates. Apply the same origin-date correction
+                    // as above in the origin's local timezone.
+                    let corrected_origin = timezone::latest_timestamp(
+                        &origin_tz,
+                        origin_local_time + (date_offset as i64).days(),
+                    )?;
+                    radar_locations.metrolink_position(
+                        number,
+                        corrected_origin,
+                        route_name.as_deref(),
+                        timestamp,
+                        &amtrak_position,
+                    )
+                })
+        })
         .map(|(position, timestamp)| (position, Some(timestamp)))
-        .unwrap_or_else(|| {
-            (
-                gtfs_realtime::Position {
-                    speed: get_speed(feature),
-                    odometer: None,
-                    bearing: get_bearing(feature),
-                    latitude: point[1] as f32,
-                    longitude: point[0] as f32,
-                },
-                timestamp,
-            )
-        });
+        .unwrap_or((amtrak_position, timestamp));
 
     let trip_desc = gtfs_realtime::TripDescriptor {
         trip_id: trip_id.clone(),

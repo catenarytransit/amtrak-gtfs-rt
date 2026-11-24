@@ -40,7 +40,10 @@ struct Location {
 }
 
 #[derive(Default)]
-pub(crate) struct Locations(HashMap<(Date, u32), (Position, u64)>);
+pub(crate) struct Locations {
+    mta: HashMap<(Date, u32), (Position, u64)>,
+    metrolink: crate::metrolink::Locations,
+}
 
 impl Locations {
     fn from_trains(trains: Vec<Train>, now: u64) -> Self {
@@ -88,15 +91,39 @@ impl Locations {
                 *best = (position, timestamp);
             }
         }
-        Self(positions)
+        Self {
+            mta: positions,
+            ..Self::default()
+        }
     }
 
     pub(crate) fn position(&self, run_date: Date, train_number: &str) -> Option<(Position, u64)> {
-        self.0.get(&(run_date, train_number.parse().ok()?)).copied()
+        self.mta.get(&(run_date, train_number.parse().ok()?)).copied()
+    }
+
+    pub(crate) fn with_metrolink(mut self, metrolink: crate::metrolink::Locations) -> Self {
+        self.metrolink = metrolink;
+        self
+    }
+
+    pub(crate) fn metrolink_position(
+        &self,
+        train_number: &str,
+        origin: Timestamp,
+        route_name: Option<&str>,
+        amtrak_timestamp: Option<u64>,
+        amtrak_position: &Position,
+    ) -> Option<(Position, u64)> {
+        self.metrolink.position(train_number, origin, route_name, amtrak_timestamp, amtrak_position)
     }
 }
 
 pub(crate) async fn fetch(client: &reqwest::Client) -> Locations {
+    let (mta, metrolink) = futures::join!(fetch_mta(client), crate::metrolink::fetch(client));
+    mta.with_metrolink(metrolink)
+}
+
+async fn fetch_mta(client: &reqwest::Client) -> Locations {
     let result = async {
         client
             .get(LOCATIONS_URL)
